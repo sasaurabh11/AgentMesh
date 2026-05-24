@@ -60,6 +60,8 @@ export type Message = {
   created_at: string;
 };
 
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
 export const AgentAPI = {
   list: () => api.get<Agent[]>('/api/agents').then((r) => r.data),
   create: (d: Partial<Agent>) => api.post<Agent>('/api/agents', d).then((r) => r.data),
@@ -68,6 +70,14 @@ export const AgentAPI = {
   remove: (id: string) => api.delete(`/api/agents/${id}`),
   test: (id: string, input: string) =>
     api.post(`/api/agents/${id}/test`, { input }).then((r) => r.data),
+  chat: (id: string, input: string, messages: ChatMessage[]) =>
+    api
+      .post<{ output: string; tokens: number; cost_usd: number }>(
+        `/api/agents/${id}/test`,
+        { input, messages }
+      )
+      .then((r) => r.data),
+  createOrchestrator: () => api.post<Agent>('/api/agents/orchestrator').then((r) => r.data),
 };
 
 export const WorkflowAPI = {
@@ -77,6 +87,7 @@ export const WorkflowAPI = {
   create: (d: Partial<Workflow>) => api.post<Workflow>('/api/workflows', d).then((r) => r.data),
   update: (id: string, d: Partial<Workflow>) =>
     api.put<Workflow>(`/api/workflows/${id}`, d).then((r) => r.data),
+  remove: (id: string) => api.delete(`/api/workflows/${id}`),
   execute: (id: string, input: string) =>
     api.post(`/api/workflows/${id}/execute`, { input }).then((r) => r.data),
 };
@@ -87,4 +98,6 @@ export const ExecutionAPI = {
   logs: (id: string) => api.get<ExecutionLog[]>(`/api/executions/${id}/logs`).then((r) => r.data),
   messages: (id: string) =>
     api.get<Message[]>(`/api/executions/${id}/messages`).then((r) => r.data),
+  sendInput: (id: string, input: string) =>
+    api.post(`/api/executions/${id}/input`, { input }).then((r) => r.data),
 };

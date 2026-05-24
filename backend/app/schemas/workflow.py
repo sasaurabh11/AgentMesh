@@ -12,6 +12,10 @@ class WorkflowBase(BaseModel):
     graph_definition: dict[str, Any]
     is_template: bool = False
 
+
+class WorkflowCreate(WorkflowBase):
+    """Payload for creating a workflow — validates the graph on write."""
+
     @model_validator(mode="after")
     def validate_graph(self):
         nodes = self.graph_definition.get("nodes", [])
@@ -47,10 +51,6 @@ class WorkflowBase(BaseModel):
         if any(walk(str(node_id)) for node_id in ids):
             raise ValueError("circular dependency requires feedback_loop=true on the looping edge")
         return self
-
-
-class WorkflowCreate(WorkflowBase):
-    """Payload for creating a workflow."""
 
 
 class WorkflowUpdate(BaseModel):

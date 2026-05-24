@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Play, Save } from 'lucide-react';
+import { Play, Save, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { WorkflowAPI } from '../api/client';
 import { useAgents } from '../hooks/useAgents';
@@ -22,6 +22,8 @@ export function WorkflowBuilder() {
   const [name, setName] = useState('Untitled Workflow');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
+  const [showRunDialog, setShowRunDialog] = useState(false);
+  const [runInput, setRunInput] = useState('');
   const [graph, setGraph] = useState<any>({
     nodes: [
       { id: 'start', type: 'start' },
@@ -55,7 +57,9 @@ export function WorkflowBuilder() {
     if (id && id !== 'new') {
       setError('');
       try {
-        const r = await WorkflowAPI.execute(id, 'Manual run from builder');
+        const r = await WorkflowAPI.execute(id, runInput || 'Manual run from builder');
+        setShowRunDialog(false);
+        setRunInput('');
         nav(`/executions/${r.execution_id}`);
       } catch (e: any) {
         setError(e?.response?.data?.detail ?? e?.message ?? 'Failed to execute workflow');
@@ -77,7 +81,7 @@ export function WorkflowBuilder() {
           Save
         </Button>
         {id && id !== 'new' && (
-          <Button onClick={run}>
+          <Button onClick={() => setShowRunDialog(true)}>
             <Play size={16} />
             Execute
           </Button>
@@ -102,6 +106,29 @@ export function WorkflowBuilder() {
         </select>
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
+      {showRunDialog && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">Run workflow</p>
+            <button onClick={() => setShowRunDialog(false)} className="text-slate-400 hover:text-slate-600">
+              <X size={16} />
+            </button>
+          </div>
+          <Textarea
+            rows={3}
+            placeholder="Enter input for this workflow run… (optional)"
+            value={runInput}
+            onChange={(e) => setRunInput(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button onClick={run}>
+              <Play size={16} />
+              Run
+            </Button>
+            <Button onClick={() => setShowRunDialog(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
       <WorkflowCanvas agents={agents.data ?? []} value={graph} onChange={setGraph} />
     </div>
   );

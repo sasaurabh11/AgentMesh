@@ -1,4 +1,5 @@
-import { Bot, Cable } from 'lucide-react';
+import { Bot, Cable, MessageSquare } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { Agent } from '../../api/client';
 import { Card } from '../ui/card';
 
@@ -15,9 +16,15 @@ export function AgentCard({ agent, onEdit }: { agent: Agent; onEdit: () => void 
             <p className="text-sm text-slate-600">{agent.role}</p>
           </div>
         </div>
-        <button onClick={onEdit} className="text-sm text-primary">
-          Edit
-        </button>
+        <div className="flex items-center gap-3">
+          <Link to={`/chat/${agent.id}`} className="inline-flex items-center gap-1 text-sm text-primary">
+            <MessageSquare size={14} />
+            Chat
+          </Link>
+          <button onClick={onEdit} className="text-sm text-slate-500 hover:text-primary">
+            Edit
+          </button>
+        </div>
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
         <span className="rounded bg-slate-100 px-2 py-1">{agent.model}</span>

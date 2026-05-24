@@ -1,7 +1,9 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { Activity, Bot, Boxes, Home, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, Bot, Boxes, Home, MessageSquare, Settings as SettingsIcon } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard';
 import { Agents } from './pages/Agents';
+import { Chat } from './pages/Chat';
+import { Workflows } from './pages/Workflows';
 import { WorkflowBuilder } from './pages/WorkflowBuilder';
 import { Executions } from './pages/Executions';
 import { ExecutionDetail } from './pages/ExecutionDetail';
@@ -9,7 +11,8 @@ import { Settings } from './pages/Settings';
 const nav = [
   ['/', 'Dashboard', Home],
   ['/agents', 'Agents', Bot],
-  ['/workflows/new', 'Workflows', Boxes],
+  ['/chat', 'Chat', MessageSquare],
+  ['/workflows', 'Workflows', Boxes],
   ['/executions', 'Executions', Activity],
   ['/settings', 'Settings', SettingsIcon],
 ] as const;
@@ -37,6 +40,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/agents" element={<Agents />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/chat/:agentId" element={<Chat />} />
+          <Route path="/workflows" element={<Workflows />} />
           <Route path="/workflows/new" element={<WorkflowBuilder />} />
           <Route path="/workflows/:id" element={<WorkflowBuilder />} />
           <Route path="/executions" element={<Executions />} />

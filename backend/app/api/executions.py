@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.execution import Execution, ExecutionLog
 from app.models.message import Message
+from app.runtime.human_input import submit_input
 from app.schemas.execution import ExecutionLogRead, ExecutionRead
 from app.schemas.message import MessageRead
 
@@ -48,3 +50,18 @@ async def get_execution_messages(execution_id: UUID, db: AsyncSession = Depends(
         select(Message).where(Message.execution_id == execution_id).order_by(Message.created_at)
     )
     return result.scalars().all()
+
+
+class HumanInputPayload(BaseModel):
+    input: str
+
+
+@router.post("/{execution_id}/input")
+async def submit_execution_input(execution_id: UUID, payload: HumanInputPayload):
+    accepted = await submit_input(str(execution_id), payload.input)
+    if not accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="This execution is not currently waiting for input.",
+        )
+    return {"status": "ok"}

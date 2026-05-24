@@ -17,3 +17,11 @@ export function useSaveWorkflow() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
   });
 }
+
+export function useDeleteWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => WorkflowAPI.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+  });
+}

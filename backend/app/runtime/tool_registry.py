@@ -3,16 +3,23 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 import httpx
 from duckduckgo_search import DDGS
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 from telegram import Bot
 from app.config import get_settings
 from app.queue.producer import publish_event
 from app.runtime.llm_factory import build_chat_model
+
+# Set by agent_node.py before each executor invocation so tools know which execution they're in.
+_current_execution_id: ContextVar[str] = ContextVar("execution_id", default="")
 
 settings = get_settings()
 WORKSPACE = Path(settings.workspace_dir).resolve()
@@ -144,33 +151,80 @@ def summarize_text(text: str) -> str:
 
 class DelegateArgs(BaseModel):
     agent_id: str = Field(description="Target agent UUID")
-    message: str
+    message: str = Field(description="Task or question for the target agent")
 
 
-async def delegate_to_agent_async(
-    agent_id: str, message: str, execution_id: str | None = None, from_agent: str | None = None
-) -> str:
-    event = {
-        "type": "inter_agent_message",
-        "agent_id": agent_id,
-        "content": message,
-        "metadata": {"from_agent": from_agent, "to_agent": agent_id},
-    }
-    if execution_id:
-        await publish_event(f"execution:{execution_id}:logs", event)
-    return "delegated"
+async def _delegate_async(agent_id: str, message: str) -> str:
+    from app.database import AsyncSessionLocal
+    from app.models.agent import Agent as AgentModel
+
+    exec_id = _current_execution_id.get()
+
+    async with AsyncSessionLocal() as db:
+        agent = await db.get(AgentModel, UUID(agent_id))
+        if not agent:
+            return f"Error: agent {agent_id} not found"
+
+    llm = build_chat_model(agent.model)
+    msgs = [SystemMessage(content=agent.system_prompt), HumanMessage(content=message)]
+    result = await llm.ainvoke(msgs)
+    output = str(result.content)
+
+    if exec_id:
+        await publish_event(
+            f"execution:{exec_id}:logs",
+            {
+                "type": "inter_agent_message",
+                "agent_id": agent_id,
+                "content": output,
+                "metadata": {"agent_name": agent.name, "task": message},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    return output
 
 
 def _delegate_to_agent(agent_id: str, message: str) -> str:
-    return asyncio.run(delegate_to_agent_async(agent_id, message))
+    return asyncio.run(_delegate_async(agent_id, message))
 
 
 delegate_to_agent = StructuredTool.from_function(
     func=_delegate_to_agent,
     name="delegate_to_agent",
-    description="Route a message to another agent by id.",
+    description=(
+        "Delegate a task to a specialist agent and get their response. "
+        "Provide the agent's UUID and a clear task description."
+    ),
     args_schema=DelegateArgs,
 )
+
+
+class HumanInputArgs(BaseModel):
+    question: str = Field(description="The question to ask the user")
+
+
+async def _request_human_input_async(question: str) -> str:
+    exec_id = _current_execution_id.get()
+    if not exec_id:
+        raise RuntimeError("request_human_input can only be used inside a workflow execution")
+    from app.runtime.human_input import request_input
+    return await request_input(exec_id, question)
+
+
+def _request_human_input(question: str) -> str:
+    return asyncio.run(_request_human_input_async(question))
+
+
+request_human_input = StructuredTool.from_function(
+    func=_request_human_input,
+    name="request_human_input",
+    description=(
+        "Ask the user a question and wait for their response. "
+        "Use this when you need clarification or additional information before proceeding."
+    ),
+    args_schema=HumanInputArgs,
+)
+
 
 AVAILABLE_TOOLS: dict[str, Any] = {
     "web_search": web_search,
@@ -181,6 +235,7 @@ AVAILABLE_TOOLS: dict[str, Any] = {
     "python_repl": python_repl,
     "summarize_text": summarize_text,
     "delegate_to_agent": delegate_to_agent,
+    "request_human_input": request_human_input,
 }
 
 

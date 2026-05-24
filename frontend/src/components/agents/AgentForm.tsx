@@ -32,6 +32,7 @@ const TOOLS = [
   { id: 'python_repl', label: 'Python REPL' },
   { id: 'summarize_text', label: 'Summarize Text' },
   { id: 'delegate_to_agent', label: 'Delegate to Agent' },
+  { id: 'request_human_input', label: 'Ask User (Human Input)' },
 ];
 
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {

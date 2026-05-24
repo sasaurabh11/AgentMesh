@@ -52,6 +52,7 @@ function toFlowEdges(value: any): Edge[] {
 }
 
 function serializeGraph(ns: Node[], es: Edge[]) {
+  const nodeIds = new Set(ns.map((n) => n.id));
   return {
     nodes: ns.map((n) => {
       const type = n.type === 'input' ? 'start' : n.type === 'output' ? 'end' : n.type;
@@ -60,12 +61,15 @@ function serializeGraph(ns: Node[], es: Edge[]) {
       if (type === 'condition') node.condition_expr = (n.data as any).condition_expr ?? '';
       return node;
     }),
-    edges: es.map((e) => {
-      const edge: any = { id: e.id, source: e.source, target: e.target };
-      if (e.label) edge.label = e.label;
-      if ((e as any).feedback_loop) edge.feedback_loop = true;
-      return edge;
-    }),
+    // Only keep edges where both source and target exist as real nodes
+    edges: es
+      .filter((e) => e.source && e.target && nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e) => {
+        const edge: any = { id: e.id, source: e.source, target: e.target };
+        if (e.label) edge.label = e.label;
+        if ((e as any).feedback_loop) edge.feedback_loop = true;
+        return edge;
+      }),
   };
 }
 

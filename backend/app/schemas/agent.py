@@ -47,8 +47,14 @@ class AgentRead(AgentBase):
     updated_at: datetime
 
 
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
 class AgentTestRequest(BaseModel):
     input: str = Field(min_length=1)
+    messages: list[ChatMessage] = Field(default_factory=list)
 
 
 class AgentTestResponse(BaseModel):

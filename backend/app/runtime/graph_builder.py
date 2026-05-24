@@ -1,4 +1,3 @@
-import operator
 import re
 from typing import Any
 from langgraph.graph import END, StateGraph
@@ -72,13 +71,6 @@ async def build_graph(workflow: Workflow, db: AsyncSession):
                 return state
 
             graph.add_node(node_id, passthrough)
-        elif node.get("type") in {"start", "end"}:
-
-            async def marker(state: OrchestrationState) -> OrchestrationState:
-                return state
-
-            graph.add_node(node_id, marker)
-
     by_source: dict[str, list[dict]] = {}
     for edge in edges:
         by_source.setdefault(edge["source"], []).append(edge)

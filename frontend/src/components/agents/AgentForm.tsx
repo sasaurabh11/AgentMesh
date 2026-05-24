@@ -7,10 +7,11 @@ import type { Agent } from '../../api/client';
 import { AgentAPI } from '../../api/client';
 import { Button } from '../ui/button';
 import { Input, Textarea } from '../ui/input';
+
 const schema = z.object({
-  name: z.string().min(1),
-  role: z.string().min(1),
-  system_prompt: z.string().min(1),
+  name: z.string().min(1, 'Name is required'),
+  role: z.string().min(1, 'Role is required'),
+  system_prompt: z.string().min(1, 'System prompt is required'),
   model: z.string(),
   tools: z.array(z.string()),
   memory_type: z.string(),
@@ -21,16 +22,41 @@ const schema = z.object({
   schedule: z.string().optional(),
   channel: z.string(),
 });
-const tools = [
-  'web_search',
-  'http_request',
-  'send_telegram_message',
-  'read_file',
-  'write_file',
-  'python_repl',
-  'summarize_text',
-  'delegate_to_agent',
+
+const TOOLS = [
+  { id: 'web_search', label: 'Web Search' },
+  { id: 'http_request', label: 'HTTP Request' },
+  { id: 'send_telegram_message', label: 'Send Telegram' },
+  { id: 'read_file', label: 'Read File' },
+  { id: 'write_file', label: 'Write File' },
+  { id: 'python_repl', label: 'Python REPL' },
+  { id: 'summarize_text', label: 'Summarize Text' },
+  { id: 'delegate_to_agent', label: 'Delegate to Agent' },
 ];
+
+function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="mb-1 block text-xs font-medium text-slate-600">
+      {children}
+      {required && <span className="ml-1 text-red-400">*</span>}
+    </label>
+  );
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="mt-1 text-xs text-red-500">{message}</p>;
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p>
+      <div className="grid gap-3">{children}</div>
+    </div>
+  );
+}
+
 export function AgentForm({
   agent,
   onSubmit,
@@ -41,27 +67,35 @@ export function AgentForm({
   const [test, setTest] = useState('');
   const [result, setResult] = useState('');
   const [apiError, setApiError] = useState('');
+
+  const defaultValues = (a?: Agent) => ({
+    name: a?.name ?? '',
+    role: a?.role ?? '',
+    system_prompt: a?.system_prompt ?? '',
+    model: a?.model ?? 'gemini-2.5-flash',
+    tools: a?.tools ?? [],
+    memory_type: (a?.memory_config as any)?.type ?? 'none',
+    window_size: (a?.memory_config as any)?.window_size ?? 8,
+    max_tokens_per_run: (a?.guardrails as any)?.max_tokens_per_run ?? 4000,
+    max_cost_usd: (a?.guardrails as any)?.max_cost_usd ?? 1,
+    forbidden_topics: ((a?.guardrails as any)?.forbidden_topics ?? []).join(', '),
+    schedule: (a?.schedule as any)?.cron_expression ?? '',
+    channel: a?.channel ?? '',
+  });
+
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: {
-      name: agent?.name ?? '',
-      role: agent?.role ?? '',
-      system_prompt: agent?.system_prompt ?? '',
-      model: agent?.model ?? 'gemini-2.5-flash',
-      tools: agent?.tools ?? [],
-      memory_type: (agent?.memory_config as any)?.type ?? 'none',
-      window_size: (agent?.memory_config as any)?.window_size ?? 8,
-      max_tokens_per_run: (agent?.guardrails as any)?.max_tokens_per_run ?? 4000,
-      max_cost_usd: (agent?.guardrails as any)?.max_cost_usd ?? 1,
-      forbidden_topics: ((agent?.guardrails as any)?.forbidden_topics ?? []).join(','),
-      schedule: (agent?.schedule as any)?.cron_expression ?? '',
-      channel: agent?.channel ?? '',
-    },
+    mode: 'onSubmit',
+    defaultValues: defaultValues(agent),
   });
+
+  const memoryType = watch('memory_type');
+
   async function save(v: any) {
     setApiError('');
     try {
@@ -90,79 +124,155 @@ export function AgentForm({
       setApiError(e?.response?.data?.detail ?? e?.message ?? 'Failed to save agent');
     }
   }
+
   async function runTest() {
     if (agent?.id && test) {
-      const r = await AgentAPI.test(agent.id, test);
-      setResult(r.output);
+      setResult('Running…');
+      try {
+        const r = await AgentAPI.test(agent.id, test);
+        setResult(r.output);
+      } catch (e: any) {
+        setResult(`Error: ${e?.response?.data?.detail ?? e?.message ?? 'Test failed'}`);
+      }
     }
   }
+
   return (
-    <form onSubmit={handleSubmit(save)} className="grid gap-3">
-      <div>
-        <Input placeholder="Name" {...register('name')} />
-        {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message as string}</p>}
-      </div>
-      <div>
-        <Input placeholder="Role" {...register('role')} />
-        {errors.role && <p className="mt-1 text-xs text-red-500">{errors.role.message as string}</p>}
-      </div>
-      <div>
-        <Textarea rows={5} placeholder="System Prompt" {...register('system_prompt')} />
-        {errors.system_prompt && <p className="mt-1 text-xs text-red-500">{errors.system_prompt.message as string}</p>}
-      </div>
-      <select className="rounded-md border border-border px-3 py-2" {...register('model')}>
-        <option value="gemini-2.5-flash">gemini-2.5-flash - Gemini free tier</option>
-        <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b - Gemini free tier</option>
-        <option value="gemini-2.0-flash">gemini-2.0-flash - Gemini free tier where available</option>
-        <option value="gpt-4o">gpt-4o - OpenAI paid</option>
-        <option value="gpt-4o-mini">gpt-4o-mini - OpenAI paid</option>
-      </select>
-      <div className="grid grid-cols-2 gap-2">
-        {tools.map((t) => (
-          <label key={t} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" value={t} {...register('tools')} />
-            {t}
-          </label>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <select className="rounded-md border border-border px-3 py-2" {...register('memory_type')}>
-          <option value="none">none</option>
-          <option value="buffer">buffer</option>
-          <option value="summary">summary</option>
-        </select>
-        <Input type="number" placeholder="Window size" {...register('window_size')} />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Input type="number" placeholder="Max tokens" {...register('max_tokens_per_run')} />
-        <Input type="number" step="0.01" placeholder="Max cost USD" {...register('max_cost_usd')} />
-      </div>
-      <Input placeholder="Forbidden topics, comma separated" {...register('forbidden_topics')} />
-      <Input placeholder="Cron expression (optional)" {...register('schedule')} />
-      <select className="rounded-md border border-border px-3 py-2" {...register('channel')}>
-        <option value="">none</option>
-        <option value="telegram">telegram</option>
-      </select>
-      {apiError && <p className="text-xs text-red-500">{apiError}</p>}
+    <form onSubmit={handleSubmit(save)} className="grid gap-4">
+      {/* Basic Info */}
+      <Section title="Basic Info">
+        <div>
+          <Label required>Name</Label>
+          <Input placeholder="e.g. Research Agent" {...register('name')} />
+          <FieldError message={errors.name?.message as string} />
+        </div>
+        <div>
+          <Label required>Role</Label>
+          <Input placeholder="e.g. Finds source material" {...register('role')} />
+          <FieldError message={errors.role?.message as string} />
+        </div>
+        <div>
+          <Label required>System Prompt</Label>
+          <Textarea
+            rows={5}
+            placeholder="Describe what this agent should do…"
+            {...register('system_prompt')}
+          />
+          <FieldError message={errors.system_prompt?.message as string} />
+        </div>
+      </Section>
+
+      {/* Model */}
+      <Section title="Model">
+        <div>
+          <Label>LLM Model</Label>
+          <select className="w-full rounded-md border border-border px-3 py-2 text-sm" {...register('model')}>
+            <optgroup label="Gemini (Free tier)">
+              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+              <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b</option>
+            </optgroup>
+            <optgroup label="OpenAI (Paid)">
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+            </optgroup>
+          </select>
+        </div>
+      </Section>
+
+      {/* Tools */}
+      <Section title="Tools">
+        <div className="grid grid-cols-2 gap-y-2">
+          {TOOLS.map((t) => (
+            <label key={t.id} className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" value={t.id} className="accent-primary" {...register('tools')} />
+              {t.label}
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      {/* Memory */}
+      <Section title="Memory">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label>Type</Label>
+            <select className="w-full rounded-md border border-border px-3 py-2 text-sm" {...register('memory_type')}>
+              <option value="none">None</option>
+              <option value="buffer">Buffer (last N messages)</option>
+              <option value="summary">Summary</option>
+            </select>
+          </div>
+          {memoryType !== 'none' && (
+            <div>
+              <Label>Window Size</Label>
+              <Input type="number" placeholder="8" {...register('window_size')} />
+            </div>
+          )}
+        </div>
+      </Section>
+
+      {/* Guardrails */}
+      <Section title="Guardrails">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label>Max Tokens / Run</Label>
+            <Input type="number" placeholder="4000" {...register('max_tokens_per_run')} />
+          </div>
+          <div>
+            <Label>Max Cost (USD)</Label>
+            <Input type="number" step="0.01" placeholder="1.00" {...register('max_cost_usd')} />
+          </div>
+        </div>
+        <div>
+          <Label>Forbidden Topics</Label>
+          <Input placeholder="violence, politics (comma separated)" {...register('forbidden_topics')} />
+        </div>
+      </Section>
+
+      {/* Schedule & Channel */}
+      <Section title="Schedule & Channel">
+        <div>
+          <Label>Cron Schedule</Label>
+          <Input placeholder="0 9 * * * (optional)" {...register('schedule')} />
+        </div>
+        <div>
+          <Label>Messaging Channel</Label>
+          <select className="w-full rounded-md border border-border px-3 py-2 text-sm" {...register('channel')}>
+            <option value="">None</option>
+            <option value="telegram">Telegram</option>
+          </select>
+        </div>
+      </Section>
+
+      {apiError && <p className="rounded bg-red-50 px-3 py-2 text-xs text-red-600">{apiError}</p>}
+
       <Button type="submit" disabled={isSubmitting}>
         <Save size={16} />
         {isSubmitting ? 'Saving…' : 'Save Agent'}
       </Button>
+
+      {/* Test panel — only for saved agents */}
       {agent && (
-        <div className="grid gap-2 border-t pt-3">
-          <Input
-            placeholder="Test message"
-            value={test}
-            onChange={(e) => setTest(e.target.value)}
-          />
-          <Button type="button" onClick={runTest}>
+        <Section title="Test This Agent">
+          <div>
+            <Label>Test Message</Label>
+            <Input
+              placeholder="Send a message to this agent…"
+              value={test}
+              onChange={(e) => setTest(e.target.value)}
+            />
+          </div>
+          <Button type="button" onClick={runTest} disabled={!test}>
             <Play size={16} />
-            Test
+            Run Test
           </Button>
           {result && (
-            <pre className="whitespace-pre-wrap rounded bg-slate-100 p-3 text-sm">{result}</pre>
+            <pre className="whitespace-pre-wrap rounded bg-white p-3 text-xs text-slate-700 border">
+              {result}
+            </pre>
           )}
-        </div>
+        </Section>
       )}
     </form>
   );

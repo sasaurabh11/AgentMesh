@@ -109,9 +109,20 @@ write_file = StructuredTool.from_function(
 @tool
 def python_repl(code: str) -> str:
     """Execute Python code in a restricted subprocess and return stdout/stderr."""
+    runner = (
+        "import ast\n"
+        "source = " + repr(code) + "\n"
+        "tree = ast.parse(source, mode='exec')\n"
+        "if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):\n"
+        "    result = eval(compile(ast.Expression(tree.body[0].value), '<agent-code>', 'eval'))\n"
+        "    if result is not None:\n"
+        "        print(result)\n"
+        "else:\n"
+        "    exec(compile(tree, '<agent-code>', 'exec'))\n"
+    )
     env = {"PYTHONPATH": "", "PATH": os.environ.get("PATH", "")}
     proc = subprocess.run(
-        ["python", "-I", "-c", code],
+        ["python", "-I", "-c", runner],
         capture_output=True,
         text=True,
         timeout=10,
@@ -121,7 +132,7 @@ def python_repl(code: str) -> str:
     output = (proc.stdout + proc.stderr).strip()
     if proc.returncode != 0:
         raise RuntimeError(output or f"python exited with {proc.returncode}")
-    return output
+    return output or "ok"
 
 
 @tool

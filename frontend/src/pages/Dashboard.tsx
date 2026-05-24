@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ExecutionAPI } from '../api/client';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+
 export function Dashboard() {
   const agents = useAgents();
   const workflows = useWorkflows();

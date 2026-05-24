@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Play, Save } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -29,11 +29,13 @@ export function WorkflowBuilder() {
     ],
     edges: [],
   });
-  if (workflow.data && name === 'Untitled Workflow') {
-    setName(workflow.data.name);
-    setDescription(workflow.data.description);
-    setGraph(workflow.data.graph_definition);
-  }
+  useEffect(() => {
+    if (workflow.data) {
+      setName(workflow.data.name);
+      setDescription(workflow.data.description);
+      setGraph(workflow.data.graph_definition);
+    }
+  }, [workflow.data]);
   async function persist() {
     setError('');
     try {

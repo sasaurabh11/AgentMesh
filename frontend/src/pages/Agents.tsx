@@ -5,12 +5,15 @@ import { AgentCard } from '../components/agents/AgentCard';
 import { AgentForm } from '../components/agents/AgentForm';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
+
 export function Agents() {
   const [editing, setEditing] = useState<Agent | null>(null);
   const [open, setOpen] = useState(false);
+
   const agents = useAgents();
   const create = useCreateAgent();
   const update = useUpdateAgent();
+
   async function save(data: any) {
     if (editing) {
       await new Promise<void>((resolve, reject) =>
@@ -24,6 +27,7 @@ export function Agents() {
     setOpen(false);
     setEditing(null);
   }
+  
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
       <section>
@@ -63,7 +67,7 @@ export function Agents() {
         {open && (
           <Card>
             <h2 className="mb-3 font-semibold">{editing ? 'Edit Agent' : 'Create Agent'}</h2>
-            <AgentForm agent={editing ?? undefined} onSubmit={save} />
+            <AgentForm key={editing?.id ?? 'create'} agent={editing ?? undefined} onSubmit={save} />
           </Card>
         )}
       </aside>

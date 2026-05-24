@@ -1,4 +1,5 @@
 import { Handle, Position } from 'react-flow-renderer';
+
 export function ConditionNode({ data }: any) {
   return (
     <div className="rotate-45 border-2 border-accent bg-white p-5 shadow">

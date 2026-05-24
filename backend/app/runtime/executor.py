@@ -47,11 +47,15 @@ async def execute_workflow(
         workflow = await db.get(Workflow, UUID(workflow_id))
         if not workflow:
             raise ValueError("workflow not found")
-        graph = await build_graph(workflow, db)
         await db.commit()
 
     final_state = None
     try:
+        async with AsyncSessionLocal() as db:
+            workflow = await db.get(Workflow, UUID(workflow_id))
+            if not workflow:
+                raise ValueError("workflow not found")
+            graph = await build_graph(workflow, db)
         initial_state = {
             "input": input_text,
             "messages": [HumanMessage(content=input_text)],

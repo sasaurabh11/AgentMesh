@@ -1,6 +1,7 @@
 import { Bot, Cable } from 'lucide-react';
 import type { Agent } from '../../api/client';
 import { Card } from '../ui/card';
+
 export function AgentCard({ agent, onEdit }: { agent: Agent; onEdit: () => void }) {
   return (
     <Card className="space-y-3">

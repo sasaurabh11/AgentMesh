@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+
 export const useAgentStore = create<{
   selectedAgentId: string | null;
   select: (id: string | null) => void;

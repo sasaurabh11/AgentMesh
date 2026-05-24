@@ -1,4 +1,5 @@
 import { Handle, Position } from 'react-flow-renderer';
+
 export function AgentNode({ data }: any) {
   return (
     <div className="min-w-[180px] rounded-md border-2 border-primary bg-white p-3 shadow">

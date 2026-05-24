@@ -1,5 +1,6 @@
 import axios from 'axios';
 export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? '' });
+
 export type Agent = {
   id: string;
   name: string;
@@ -16,6 +17,7 @@ export type Agent = {
   created_at: string;
   updated_at: string;
 };
+
 export type Workflow = {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export type Workflow = {
   created_at: string;
   updated_at: string;
 };
+
 export type Execution = {
   id: string;
   workflow_id: string;
@@ -36,6 +39,7 @@ export type Execution = {
   total_tokens: number;
   total_cost_usd: number;
 };
+
 export type ExecutionLog = {
   id: string;
   execution_id: string;
@@ -45,6 +49,7 @@ export type ExecutionLog = {
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
 export type Message = {
   id: string;
   execution_id: string;
@@ -54,6 +59,7 @@ export type Message = {
   telegram_chat_id: string | null;
   created_at: string;
 };
+
 export const AgentAPI = {
   list: () => api.get<Agent[]>('/api/agents').then((r) => r.data),
   create: (d: Partial<Agent>) => api.post<Agent>('/api/agents', d).then((r) => r.data),
@@ -63,6 +69,7 @@ export const AgentAPI = {
   test: (id: string, input: string) =>
     api.post(`/api/agents/${id}/test`, { input }).then((r) => r.data),
 };
+
 export const WorkflowAPI = {
   list: () => api.get<Workflow[]>('/api/workflows').then((r) => r.data),
   templates: () => api.get<Workflow[]>('/api/workflows/templates').then((r) => r.data),
@@ -73,6 +80,7 @@ export const WorkflowAPI = {
   execute: (id: string, input: string) =>
     api.post(`/api/workflows/${id}/execute`, { input }).then((r) => r.data),
 };
+
 export const ExecutionAPI = {
   list: () => api.get<Execution[]>('/api/executions').then((r) => r.data),
   get: (id: string) => api.get<Execution>(`/api/executions/${id}`).then((r) => r.data),

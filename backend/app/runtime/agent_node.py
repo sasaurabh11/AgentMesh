@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,7 +56,7 @@ def build_agent_node(agent: Agent) -> Callable[[OrchestrationState], Orchestrati
             MessagesPlaceholder("agent_scratchpad"),
         ]
     )
-    lc_agent = create_openai_tools_agent(llm, selected_tools, prompt)
+    lc_agent = create_tool_calling_agent(llm, selected_tools, prompt)
     executor = AgentExecutor(
         agent=lc_agent, tools=selected_tools, verbose=False, return_intermediate_steps=True
     )

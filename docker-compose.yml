@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: orchestration
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +18,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -29,6 +29,9 @@ services:
     build: ./backend
     command: sh -c "alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      WORKSPACE_DIR: /workspace
     ports:
       - "8000:8000"
     volumes:
@@ -44,6 +47,9 @@ services:
     build: ./backend
     command: celery -A app.tasks.scheduled_agents.celery_app worker --loglevel=info
     env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      WORKSPACE_DIR: /workspace
     volumes:
       - ./backend:/app
       - workspace-data:/workspace

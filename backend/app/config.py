@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    default_summary_model: str = Field(default="gemini-2.5-flash", alias="DEFAULT_SUMMARY_MODEL")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(default="", alias="TELEGRAM_WEBHOOK_SECRET")
     secret_key: str = Field(default="dev-secret", alias="SECRET_KEY")

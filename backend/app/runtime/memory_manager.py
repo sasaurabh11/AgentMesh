@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from langchain.memory import ConversationBufferWindowMemory, ConversationSummaryBufferMemory
-from langchain_openai import ChatOpenAI
-from app.config import get_settings
 from app.models.agent import Agent
+from app.runtime.llm_factory import build_chat_model
 
 
 _memory_cache: dict[str, object] = {}
@@ -23,8 +22,7 @@ def buffer_memory(
 def summary_memory(agent_id: str) -> ConversationSummaryBufferMemory:
     key = f"summary:{agent_id}"
     if key not in _memory_cache:
-        settings = get_settings()
-        llm = ChatOpenAI(model="gpt-4o-mini", api_key=settings.openai_api_key)
+        llm = build_chat_model("gemini-2.5-flash")
         _memory_cache[key] = ConversationSummaryBufferMemory(
             llm=llm, max_token_limit=1500, return_messages=True, memory_key="chat_history"
         )

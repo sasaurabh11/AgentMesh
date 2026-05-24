@@ -21,6 +21,7 @@ export function WorkflowBuilder() {
   const save = useSaveWorkflow();
   const [name, setName] = useState('Untitled Workflow');
   const [description, setDescription] = useState('');
+  const [error, setError] = useState('');
   const [graph, setGraph] = useState<any>({
     nodes: [
       { id: 'start', type: 'start' },
@@ -34,19 +35,29 @@ export function WorkflowBuilder() {
     setGraph(workflow.data.graph_definition);
   }
   async function persist() {
-    const w = await save.mutateAsync({
-      id: id && id !== 'new' ? id : undefined,
-      name,
-      description,
-      graph_definition: graph,
-      is_template: false,
-    });
-    nav(`/workflows/${w.id}`);
+    setError('');
+    try {
+      const w = await save.mutateAsync({
+        id: id && id !== 'new' ? id : undefined,
+        name,
+        description,
+        graph_definition: graph,
+        is_template: false,
+      });
+      nav(`/workflows/${w.id}`);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? e?.message ?? 'Failed to save workflow');
+    }
   }
   async function run() {
     if (id && id !== 'new') {
-      const r = await WorkflowAPI.execute(id, 'Manual run from builder');
-      nav(`/executions/${r.execution_id}`);
+      setError('');
+      try {
+        const r = await WorkflowAPI.execute(id, 'Manual run from builder');
+        nav(`/executions/${r.execution_id}`);
+      } catch (e: any) {
+        setError(e?.response?.data?.detail ?? e?.message ?? 'Failed to execute workflow');
+      }
     }
   }
   return (
@@ -88,6 +99,7 @@ export function WorkflowBuilder() {
           ))}
         </select>
       </div>
+      {error && <p className="text-sm text-red-500">{error}</p>}
       <WorkflowCanvas agents={agents.data ?? []} value={graph} onChange={setGraph} />
     </div>
   );

@@ -11,9 +11,16 @@ export function Agents() {
   const agents = useAgents();
   const create = useCreateAgent();
   const update = useUpdateAgent();
-  function save(data: any) {
-    if (editing) update.mutate({ id: editing.id, data });
-    else create.mutate(data);
+  async function save(data: any) {
+    if (editing) {
+      await new Promise<void>((resolve, reject) =>
+        update.mutate({ id: editing.id, data }, { onSuccess: () => resolve(), onError: reject })
+      );
+    } else {
+      await new Promise<void>((resolve, reject) =>
+        create.mutate(data, { onSuccess: () => resolve(), onError: reject })
+      );
+    }
     setOpen(false);
     setEditing(null);
   }

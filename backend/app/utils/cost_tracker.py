@@ -17,6 +17,8 @@ def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
 
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    if model.startswith("gemini-"):
+        return 0.0
     pricing = MODEL_PRICING_USD_PER_1K.get(model, MODEL_PRICING_USD_PER_1K["gpt-4o-mini"])
     return round(
         (input_tokens / 1000 * pricing["input"]) + (output_tokens / 1000 * pricing["output"]), 8

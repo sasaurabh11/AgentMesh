@@ -8,11 +8,11 @@ from typing import Any
 import httpx
 from duckduckgo_search import DDGS
 from langchain_core.tools import StructuredTool, tool
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from telegram import Bot
 from app.config import get_settings
 from app.queue.producer import publish_event
+from app.runtime.llm_factory import build_chat_model
 
 settings = get_settings()
 WORKSPACE = Path(settings.workspace_dir).resolve()
@@ -127,7 +127,7 @@ def python_repl(code: str) -> str:
 @tool
 def summarize_text(text: str) -> str:
     """Summarize text using the configured OpenAI model."""
-    llm = ChatOpenAI(model="gpt-4o-mini", api_key=settings.openai_api_key)
+    llm = build_chat_model(settings.default_summary_model)
     return llm.invoke(f"Summarize the following text clearly:\n\n{text}").content
 
 

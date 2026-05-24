@@ -1,10 +1,9 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
-from langchain_openai import ChatOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import get_settings
 from app.database import get_db
+from app.runtime.llm_factory import build_chat_model, normalize_model_name
 from app.models.agent import Agent
 from app.schemas.agent import (
     AgentCreate,
@@ -67,15 +66,11 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
-    settings = get_settings()
-    llm = ChatOpenAI(
-        model=agent.model if agent.model.startswith("gpt") else "gpt-4o-mini",
-        api_key=settings.openai_api_key,
-    )
+    llm = build_chat_model(agent.model)
     prompt = f"{agent.system_prompt}\n\nUser message: {payload.input}"
     result = await llm.ainvoke(prompt)
     output = str(result.content)
-    input_tokens = count_tokens(prompt, agent.model)
-    output_tokens = count_tokens(output, agent.model)
+    input_tokens = count_tokens(prompt, normalize_model_name(agent.model))
+    output_tokens = count_tokens(output, normalize_model_name(agent.model))
     cost = calculate_cost(agent.model, input_tokens, output_tokens)
     return AgentTestResponse(output=output, tokens=input_tokens + output_tokens, cost_usd=cost)

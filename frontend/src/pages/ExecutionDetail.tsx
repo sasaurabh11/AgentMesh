@@ -23,10 +23,11 @@ export function ExecutionDetail() {
     queryFn: () => ExecutionAPI.messages(id!),
     enabled: !!id,
   });
-  const live = useExecutionLogs(id);
+  const { logs: live, wsError } = useExecutionLogs(id);
   const logs = [...(persisted.data ?? []), ...live];
   return (
     <div className="space-y-4">
+      {wsError && <p className="text-sm text-red-500">{wsError}</p>}
       <Card>
         {execution.isLoading ? (
           <p>Loading execution...</p>

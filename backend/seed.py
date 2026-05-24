@@ -10,7 +10,7 @@ def agent_payload(name: str, role: str, prompt: str, tools: list[str]) -> dict:
         "name": name,
         "role": role,
         "system_prompt": prompt,
-        "model": "gpt-4o-mini",
+        "model": "gemini-2.5-flash",
         "tools": tools,
         "memory_enabled": True,
         "memory_config": {"type": "buffer", "window_size": 8},

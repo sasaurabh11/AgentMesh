@@ -97,3 +97,16 @@ TEST_DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/orchestratio
 ```
 
 The Docker stack runs the application database. For isolated local tests, create the `orchestration_test` database first or point `TEST_DATABASE_URL` to another PostgreSQL database.
+
+## Free Gemini Models
+
+The platform supports Gemini free-tier models through Google AI Studio. Add your key to `.env`:
+
+```bash
+GEMINI_API_KEY=your_google_ai_studio_key_here
+DEFAULT_SUMMARY_MODEL=gemini-2.5-flash
+```
+
+Default seeded agents use `gemini-2.5-flash`. The UI also includes `gemini-1.5-flash-8b` and `gemini-2.0-flash` options. Gemini free-tier usage is tracked as `$0.00` in the app cost table; Google may still enforce rate limits and quota rules on your API key.
+
+OpenAI models remain available if `OPENAI_API_KEY` is configured, but they are optional.

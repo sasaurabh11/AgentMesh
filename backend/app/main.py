@@ -1,3 +1,7 @@
+import warnings
+# Must be before any langchain/google imports so the filter is registered in time
+warnings.filterwarnings("ignore", message="Key 'title' is not supported in schema")
+
 import logging
 from contextlib import asynccontextmanager
 import redis.asyncio as aioredis

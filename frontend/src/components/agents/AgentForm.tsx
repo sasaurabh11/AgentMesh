@@ -173,6 +173,9 @@ export function AgentForm({
               <option value="gemini-2.0-flash">gemini-2.0-flash</option>
               <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b</option>
             </optgroup>
+            <optgroup label="Gemma (Free tier)">
+              <option value="gemma-4-31b-it">gemma-4-31b-it</option>
+            </optgroup>
             <optgroup label="OpenAI (Paid)">
               <option value="gpt-4o">gpt-4o</option>
               <option value="gpt-4o-mini">gpt-4o-mini</option>

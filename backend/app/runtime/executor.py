@@ -117,6 +117,14 @@ async def execute_workflow(
                     )
                 )
                 await db.commit()
+        # Send final output back to Telegram if this was triggered from Telegram
+        if telegram_chat_id and final_output:
+            from app.channels.telegram import send_telegram_reply
+            try:
+                await send_telegram_reply(telegram_chat_id, final_output)
+            except Exception:
+                pass  # don't fail the execution if Telegram delivery fails
+
         await publish_event(
             f"execution:{execution_id}:logs",
             {

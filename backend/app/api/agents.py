@@ -1,4 +1,5 @@
 from uuid import UUID
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,36 +140,50 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
 
     steps: list[ToolStep] = []
 
-    if tools:
-        # Use the full AgentExecutor so tools are actually invoked
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", agent.system_prompt),
-            MessagesPlaceholder("chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder("agent_scratchpad"),
-        ])
-        lc_agent = create_tool_calling_agent(llm, tools, prompt)
-        executor = AgentExecutor(
-            agent=lc_agent, tools=tools, verbose=False, return_intermediate_steps=True
-        )
-        response = await executor.ainvoke({"input": payload.input, "chat_history": chat_history})
-        output = str(response.get("output", ""))
-        context_text = agent.system_prompt + payload.input
-
-        # Collect every tool call and its result
-        for action, result in response.get("intermediate_steps", []):
-            tool_input = getattr(action, "tool_input", "")
-            steps.append(ToolStep(
-                tool=getattr(action, "tool", "unknown"),
-                input=str(tool_input) if not isinstance(tool_input, str) else tool_input,
-                output=str(result)[:2000],   # cap at 2000 chars to keep response lean
-            ))
+    # Retry up to 3 times on transient Google 503 overload errors
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            if tools:
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", agent.system_prompt),
+                    MessagesPlaceholder("chat_history", optional=True),
+                    ("human", "{input}"),
+                    MessagesPlaceholder("agent_scratchpad"),
+                ])
+                lc_agent = create_tool_calling_agent(llm, tools, prompt)
+                executor = AgentExecutor(
+                    agent=lc_agent, tools=tools, verbose=False, return_intermediate_steps=True
+                )
+                response = await executor.ainvoke({"input": payload.input, "chat_history": chat_history})
+                output = str(response.get("output", ""))
+                context_text = agent.system_prompt + payload.input
+                for action, result in response.get("intermediate_steps", []):
+                    tool_input = getattr(action, "tool_input", "")
+                    steps.append(ToolStep(
+                        tool=getattr(action, "tool", "unknown"),
+                        input=str(tool_input) if not isinstance(tool_input, str) else tool_input,
+                        output=str(result)[:2000],
+                    ))
+            else:
+                msgs: list = [SystemMessage(content=agent.system_prompt)] + chat_history + [HumanMessage(content=payload.input)]
+                result = await llm.ainvoke(msgs)
+                output = str(result.content)
+                context_text = " ".join(m.content for m in msgs if hasattr(m, "content"))
+            break  # success — exit retry loop
+        except Exception as e:
+            err_str = str(e).lower()
+            if "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
+                last_exc = e
+                if attempt < 2:
+                    await asyncio.sleep(3 * (attempt + 1))
+                    continue
+            raise
     else:
-        # No tools — plain LLM conversation
-        msgs: list = [SystemMessage(content=agent.system_prompt)] + chat_history + [HumanMessage(content=payload.input)]
-        result = await llm.ainvoke(msgs)
-        output = str(result.content)
-        context_text = " ".join(m.content for m in msgs if hasattr(m, "content"))
+        raise HTTPException(
+            status_code=503,
+            detail=f"The model is overloaded and did not recover after retries. Try again in a moment. ({last_exc})",
+        )
 
     input_tokens = count_tokens(context_text, model_key)
     output_tokens = count_tokens(output, model_key)

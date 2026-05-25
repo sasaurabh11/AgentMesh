@@ -10,7 +10,7 @@ def normalize_model_name(model: str) -> str:
 
 
 def is_gemini_model(model: str) -> bool:
-    return model.startswith("gemini-")
+    return model.startswith("gemini-") or model.startswith("gemma-")
 
 
 def build_chat_model(model: str, temperature: float = 0.2):
@@ -18,7 +18,11 @@ def build_chat_model(model: str, temperature: float = 0.2):
     if is_gemini_model(model):
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured. Create a free key in Google AI Studio and add it to .env.")
-        return ChatGoogleGenerativeAI(model=model, google_api_key=settings.gemini_api_key, temperature=temperature)
+        kwargs: dict = dict(model=model, google_api_key=settings.gemini_api_key, temperature=temperature)
+        # gemini-2.5-* are "thinking" models — disable thinking tokens so they don't appear in output
+        if "2.5" in model:
+            kwargs["thinking_budget"] = 0
+        return ChatGoogleGenerativeAI(**kwargs)
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured. Use a gemini-* agent for free-tier Gemini inference.")
     return ChatOpenAI(model=model, api_key=settings.openai_api_key, temperature=temperature)

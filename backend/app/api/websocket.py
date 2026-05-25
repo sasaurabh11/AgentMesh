@@ -19,9 +19,12 @@ async def execution_logs_ws(websocket: WebSocket, execution_id: str):
                 break
 
     async def heartbeat():
-        while True:
-            await asyncio.sleep(HEARTBEAT_INTERVAL)
-            await websocket.send_json({"type": "heartbeat"})
+        try:
+            while True:
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                await websocket.send_json({"type": "heartbeat"})
+        except (WebSocketDisconnect, Exception):
+            pass  # client disconnected — exit silently
 
     stream_task = asyncio.create_task(stream())
     hb_task = asyncio.create_task(heartbeat())
@@ -33,6 +36,10 @@ async def execution_logs_ws(websocket: WebSocket, execution_id: str):
         )
         for t in pending:
             t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, WebSocketDisconnect, Exception):
+                pass
     except (WebSocketDisconnect, Exception):
         stream_task.cancel()
         hb_task.cancel()

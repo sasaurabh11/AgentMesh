@@ -89,6 +89,22 @@ export const WorkflowAPI = {
     api.post(`/api/workflows/${id}/execute`, { input }).then((r) => r.data),
 };
 
+export type TelegramStatus = {
+  token_configured: boolean;
+  bot_username: string | null;
+  active_workflow_id: string | null;
+  active_workflow_name: string | null;
+  public_base_url: string;
+};
+
+export const TelegramAPI = {
+  status: () => api.get<TelegramStatus>('/api/settings/telegram/status').then((r) => r.data),
+  setWorkflow: (workflow_id: string) =>
+    api.post('/api/settings/telegram/workflow', { workflow_id }).then((r) => r.data),
+  registerWebhook: (webhook_url: string) =>
+    api.post('/api/settings/telegram/register', null, { params: { webhook_url } }).then((r) => r.data),
+};
+
 export const ExecutionAPI = {
   list: () => api.get<Execution[]>('/api/executions').then((r) => r.data),
   get: (id: string) => api.get<Execution>(`/api/executions/${id}`).then((r) => r.data),

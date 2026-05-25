@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import asyncio
+import time
 from datetime import datetime, timezone
+from uuid import UUID
 
+import redis as sync_redis
 from redis.asyncio import Redis
 
 from app.config import get_settings
@@ -11,54 +13,61 @@ from app.queue.producer import publish_event
 WAIT_TIMEOUT = 300  # 5 minutes
 
 
-async def request_input(execution_id: str, question: str, timeout: int = WAIT_TIMEOUT) -> str:
+async def publish_waiting(execution_id: str, question: str, timeout: int = WAIT_TIMEOUT) -> None:
     """
-    Publish a waiting_for_input event, then block until the user submits a response
-    via POST /api/executions/{id}/input.  Raises TimeoutError if no response arrives.
+    Called on the main event loop (via run_coroutine_threadsafe from the tool thread).
+    Persists the waiting_for_input log, sets the Redis flag, and publishes the WebSocket event.
     """
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
-    waiting_key = f"execution:{execution_id}:waiting"
-    input_key = f"execution:{execution_id}:human_input"
-
     try:
-        await redis.set(waiting_key, question, ex=timeout + 30)
-
-        # Persist to DB so polling queries can find it even if WebSocket is disconnected
-        from uuid import UUID
-        from app.database import AsyncSessionLocal
-        from app.models.execution import ExecutionLog
-
-        async with AsyncSessionLocal() as db:
-            db.add(ExecutionLog(
-                execution_id=UUID(execution_id),
-                log_type="waiting_for_input",
-                content=question,
-                metadata_={"prompt": question, "timeout": timeout},
-            ))
-            await db.commit()
-
-        await publish_event(
-            f"execution:{execution_id}:logs",
-            {
-                "type": "waiting_for_input",
-                "agent_id": None,
-                "content": question,
-                "metadata": {"prompt": question, "timeout": timeout},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
-            value = await redis.get(input_key)
-            if value:
-                await redis.delete(input_key)
-                await redis.delete(waiting_key)
-                return value
-            await asyncio.sleep(1)
-
+        await redis.set(f"execution:{execution_id}:waiting", question, ex=timeout + 30)
     finally:
         await redis.aclose()
+
+    # Persist to DB so polling queries surface the question even when WebSocket is down
+    from app.database import AsyncSessionLocal
+    from app.models.execution import ExecutionLog
+
+    async with AsyncSessionLocal() as db:
+        db.add(ExecutionLog(
+            execution_id=UUID(execution_id),
+            log_type="waiting_for_input",
+            content=question,
+            metadata_={"prompt": question, "timeout": timeout},
+        ))
+        await db.commit()
+
+    await publish_event(
+        f"execution:{execution_id}:logs",
+        {
+            "type": "waiting_for_input",
+            "agent_id": None,
+            "content": question,
+            "metadata": {"prompt": question, "timeout": timeout},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+def poll_input_sync(execution_id: str, timeout: int = WAIT_TIMEOUT) -> str:
+    """
+    Blocking (synchronous) poll using the non-async Redis client.
+    Safe to call from a thread without any event loop.
+    """
+    r = sync_redis.Redis.from_url(get_settings().redis_url, decode_responses=True)
+    input_key = f"execution:{execution_id}:human_input"
+    waiting_key = f"execution:{execution_id}:waiting"
+    deadline = time.time() + timeout
+    try:
+        while time.time() < deadline:
+            value = r.get(input_key)
+            if value:
+                r.delete(input_key)
+                r.delete(waiting_key)
+                return value
+            time.sleep(1)
+    finally:
+        r.close()
 
     raise TimeoutError(
         f"Workflow timed out after {timeout}s waiting for user input. Please re-run and respond promptly."
@@ -66,15 +75,13 @@ async def request_input(execution_id: str, question: str, timeout: int = WAIT_TI
 
 
 async def submit_input(execution_id: str, text: str) -> bool:
-    """Store the user's response so request_input() can pick it up. Returns False if not waiting."""
+    """Store the user's response so poll_input_sync() can pick it up. Returns False if not waiting."""
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
-    waiting_key = f"execution:{execution_id}:waiting"
-    input_key = f"execution:{execution_id}:human_input"
     try:
-        is_waiting = await redis.get(waiting_key)
+        is_waiting = await redis.get(f"execution:{execution_id}:waiting")
         if not is_waiting:
             return False
-        await redis.set(input_key, text, ex=3600)
+        await redis.set(f"execution:{execution_id}:human_input", text, ex=3600)
         return True
     finally:
         await redis.aclose()

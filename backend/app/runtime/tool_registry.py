@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import time
+from asyncio import AbstractEventLoop
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,8 @@ from app.runtime.llm_factory import build_chat_model
 
 # Set by agent_node.py before each executor invocation so tools know which execution they're in.
 _current_execution_id: ContextVar[str] = ContextVar("execution_id", default="")
+# The running main event loop — tools use this to submit async work from their sync thread.
+_current_event_loop: ContextVar[AbstractEventLoop | None] = ContextVar("event_loop", default=None)
 
 settings = get_settings()
 WORKSPACE = Path(settings.workspace_dir).resolve()
@@ -28,10 +32,48 @@ WORKSPACE.mkdir(parents=True, exist_ok=True)
 
 @tool
 def web_search(query: str) -> str:
-    """Search the web with DuckDuckGo and return concise result snippets."""
-    with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=5))
-    return "\n".join(f"{r.get('title')}: {r.get('href')} - {r.get('body')}" for r in results)
+    """Search the web and return concise result snippets."""
+    # Use Tavily if API key is configured (reliable, no rate limits on free tier)
+    if settings.tavily_api_key:
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=settings.tavily_api_key)
+            resp = client.search(query, max_results=5)
+            results = resp.get("results", [])
+            if not results:
+                return f"No results found for: {query}"
+            return "\n\n".join(
+                f"Title: {r.get('title', 'N/A')}\nURL: {r.get('url', 'N/A')}\nSnippet: {r.get('content', 'N/A')}"
+                for r in results
+            )
+        except Exception as e:
+            return f"web_search (Tavily) failed: {e}"
+
+    # Fallback: DuckDuckGo (may be rate-limited)
+    from duckduckgo_search.exceptions import RatelimitException, DuckDuckGoSearchException
+    last_err: Exception | None = None
+    for backend in ("html", "lite", "api"):
+        for attempt in range(2):
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(query, max_results=5, backend=backend))
+                if not results:
+                    return f"No results found for: {query}"
+                return "\n\n".join(
+                    f"Title: {r.get('title', 'N/A')}\nURL: {r.get('href', 'N/A')}\nSnippet: {r.get('body', 'N/A')}"
+                    for r in results
+                )
+            except RatelimitException as e:
+                last_err = e
+                time.sleep(3 * (attempt + 1))
+            except DuckDuckGoSearchException as e:
+                last_err = e
+                break
+    return (
+        f"web_search failed — DuckDuckGo is rate limiting this IP.\n"
+        f"Fix: add TAVILY_API_KEY=tvly-... to your .env file (free at https://app.tavily.com).\n"
+        f"Error: {last_err}"
+    )
 
 
 class HttpRequestArgs(BaseModel):
@@ -136,10 +178,10 @@ def python_repl(code: str) -> str:
         env=env,
         cwd=str(WORKSPACE),
     )
-    output = (proc.stdout + proc.stderr).strip()
     if proc.returncode != 0:
+        output = (proc.stdout + proc.stderr).strip()
         raise RuntimeError(output or f"python exited with {proc.returncode}")
-    return output or "ok"
+    return proc.stdout.strip() or "ok"
 
 
 @tool
@@ -185,7 +227,11 @@ async def _delegate_async(agent_id: str, message: str) -> str:
 
 
 def _delegate_to_agent(agent_id: str, message: str) -> str:
-    return asyncio.run(_delegate_async(agent_id, message))
+    loop = _current_event_loop.get()
+    if loop is None:
+        raise RuntimeError("delegate_to_agent must be used inside a workflow execution")
+    future = asyncio.run_coroutine_threadsafe(_delegate_async(agent_id, message), loop)
+    return future.result(timeout=120)
 
 
 delegate_to_agent = StructuredTool.from_function(
@@ -203,16 +249,24 @@ class HumanInputArgs(BaseModel):
     question: str = Field(description="The question to ask the user")
 
 
-async def _request_human_input_async(question: str) -> str:
-    exec_id = _current_execution_id.get()
-    if not exec_id:
-        raise RuntimeError("request_human_input can only be used inside a workflow execution")
-    from app.runtime.human_input import request_input
-    return await request_input(exec_id, question)
-
-
 def _request_human_input(question: str) -> str:
-    return asyncio.run(_request_human_input_async(question))
+    """
+    Synchronous tool function that runs in a thread-pool thread.
+    Publishes the waiting_for_input event on the main event loop, then blocks
+    this thread with a synchronous Redis poll (no event-loop conflicts).
+    """
+    exec_id = _current_execution_id.get()
+    loop = _current_event_loop.get()
+    if not exec_id or loop is None:
+        raise RuntimeError("request_human_input can only be used inside a workflow execution")
+
+    from app.runtime.human_input import publish_waiting, poll_input_sync
+
+    # Publish the event on the main event loop (async-safe from a thread)
+    asyncio.run_coroutine_threadsafe(publish_waiting(exec_id, question), loop).result(timeout=30)
+
+    # Block this thread with a plain sync poll — no event loop needed
+    return poll_input_sync(exec_id, timeout=300)
 
 
 request_human_input = StructuredTool.from_function(

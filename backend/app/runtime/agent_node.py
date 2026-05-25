@@ -15,7 +15,7 @@ from app.queue.producer import publish_event
 from app.runtime.memory_manager import get_memory
 from app.runtime.llm_factory import build_chat_model, normalize_model_name
 from app.runtime.state import OrchestrationState
-from app.runtime.tool_registry import get_tools, _current_execution_id
+from app.runtime.tool_registry import get_tools, _current_execution_id, _current_event_loop
 from app.utils.cost_tracker import calculate_cost, count_tokens
 
 
@@ -62,9 +62,11 @@ def build_agent_node(agent: Agent) -> Callable[[OrchestrationState], Orchestrati
     )
 
     async def node(state: OrchestrationState) -> OrchestrationState:
+        import asyncio as _asyncio
         execution_id = state["execution_id"]
         agent_id = str(agent.id)
         _current_execution_id.set(execution_id)
+        _current_event_loop.set(_asyncio.get_running_loop())
         await _persist_log(
             execution_id, agent_id, "agent_start", f"{agent.name} started", {"model": agent.model}
         )

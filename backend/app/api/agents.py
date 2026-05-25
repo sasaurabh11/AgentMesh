@@ -2,9 +2,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from app.database import get_db
 from app.runtime.llm_factory import build_chat_model, normalize_model_name
+from app.runtime.tool_registry import get_tools
 from app.models.agent import Agent
 from app.schemas.agent import (
     AgentCreate,
@@ -12,8 +15,12 @@ from app.schemas.agent import (
     AgentTestRequest,
     AgentTestResponse,
     AgentUpdate,
+    ToolStep,
 )
 from app.utils.cost_tracker import calculate_cost, count_tokens
+
+# Tools that require a live workflow execution context — exclude from chat/test mode
+_WORKFLOW_ONLY_TOOLS = {"delegate_to_agent", "request_human_input"}
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -115,26 +122,57 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
     agent = await db.get(Agent, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
+
     llm = build_chat_model(agent.model)
-
-    # Build a proper message sequence so the agent has full conversation context
-    msgs: list = [SystemMessage(content=agent.system_prompt)]
-    for m in payload.messages:
-        if m.role == "user":
-            msgs.append(HumanMessage(content=m.content))
-        else:
-            msgs.append(AIMessage(content=m.content))
-    msgs.append(HumanMessage(content=payload.input))
-
-    result = await llm.ainvoke(msgs)
-    output = str(result.content)
-
-    # Rough token count over the full context
-    full_text = " ".join(
-        m.content if hasattr(m, "content") else str(m) for m in msgs
-    )
     model_key = normalize_model_name(agent.model)
-    input_tokens = count_tokens(full_text, model_key)
+
+    # Build conversation history as LangChain message objects
+    chat_history: list = []
+    for m in payload.messages:
+        chat_history.append(HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content))
+
+    # Filter out tools that only work inside a live workflow execution
+    chat_tools = [
+        t for t in (agent.tools or []) if t not in _WORKFLOW_ONLY_TOOLS
+    ]
+    tools = get_tools(chat_tools)
+
+    steps: list[ToolStep] = []
+
+    if tools:
+        # Use the full AgentExecutor so tools are actually invoked
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", agent.system_prompt),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", "{input}"),
+            MessagesPlaceholder("agent_scratchpad"),
+        ])
+        lc_agent = create_tool_calling_agent(llm, tools, prompt)
+        executor = AgentExecutor(
+            agent=lc_agent, tools=tools, verbose=False, return_intermediate_steps=True
+        )
+        response = await executor.ainvoke({"input": payload.input, "chat_history": chat_history})
+        output = str(response.get("output", ""))
+        context_text = agent.system_prompt + payload.input
+
+        # Collect every tool call and its result
+        for action, result in response.get("intermediate_steps", []):
+            tool_input = getattr(action, "tool_input", "")
+            steps.append(ToolStep(
+                tool=getattr(action, "tool", "unknown"),
+                input=str(tool_input) if not isinstance(tool_input, str) else tool_input,
+                output=str(result)[:2000],   # cap at 2000 chars to keep response lean
+            ))
+    else:
+        # No tools — plain LLM conversation
+        msgs: list = [SystemMessage(content=agent.system_prompt)] + chat_history + [HumanMessage(content=payload.input)]
+        result = await llm.ainvoke(msgs)
+        output = str(result.content)
+        context_text = " ".join(m.content for m in msgs if hasattr(m, "content"))
+
+    input_tokens = count_tokens(context_text, model_key)
     output_tokens = count_tokens(output, model_key)
     cost = calculate_cost(agent.model, input_tokens, output_tokens)
-    return AgentTestResponse(output=output, tokens=input_tokens + output_tokens, cost_usd=cost)
+    return AgentTestResponse(
+        output=output, tokens=input_tokens + output_tokens, cost_usd=cost, steps=steps
+    )

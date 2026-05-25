@@ -57,7 +57,14 @@ class AgentTestRequest(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+class ToolStep(BaseModel):
+    tool: str
+    input: str
+    output: str
+
+
 class AgentTestResponse(BaseModel):
     output: str
     tokens: int
     cost_usd: float
+    steps: list[ToolStep] = Field(default_factory=list)

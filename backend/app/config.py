@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     workspace_dir: str = Field(
         default=str(Path(__file__).resolve().parents[2] / "workspace"), alias="WORKSPACE_DIR"
     )
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
 
     @property
     def cors_origins(self) -> list[str]:

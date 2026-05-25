@@ -61,6 +61,8 @@ export type Message = {
 };
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+export type ToolStep = { tool: string; input: string; output: string };
+export type ChatResponse = { output: string; tokens: number; cost_usd: number; steps: ToolStep[] };
 
 export const AgentAPI = {
   list: () => api.get<Agent[]>('/api/agents').then((r) => r.data),
@@ -71,12 +73,7 @@ export const AgentAPI = {
   test: (id: string, input: string) =>
     api.post(`/api/agents/${id}/test`, { input }).then((r) => r.data),
   chat: (id: string, input: string, messages: ChatMessage[]) =>
-    api
-      .post<{ output: string; tokens: number; cost_usd: number }>(
-        `/api/agents/${id}/test`,
-        { input, messages }
-      )
-      .then((r) => r.data),
+    api.post<ChatResponse>(`/api/agents/${id}/test`, { input, messages }).then((r) => r.data),
   createOrchestrator: () => api.post<Agent>('/api/agents/orchestrator').then((r) => r.data),
 };
 

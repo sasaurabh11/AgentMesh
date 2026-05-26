@@ -1,7 +1,9 @@
 import { useEffect, useMemo } from 'react';
 import ReactFlow, {
   Background,
+  BackgroundVariant,
   Controls,
+  MiniMap,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
@@ -13,6 +15,7 @@ import ReactFlow, {
   Node,
   NodeChange,
 } from 'react-flow-renderer';
+import { Bot, GitBranch, Plus } from 'lucide-react';
 import type { Agent } from '../../api/client';
 import { AgentNode } from './AgentNode';
 import { ConditionNode } from './ConditionNode';
@@ -39,6 +42,20 @@ function toFlowNodes(value: any): Node[] {
             : 'input',
     position: n.position ?? { x: 120 + index * 220, y: 140 },
     data: { ...n, label: n.type === 'start' ? 'START' : n.type === 'end' ? 'END' : n.label },
+    style:
+      n.type === 'start' || n.type === 'end'
+        ? {
+            background: n.type === 'start' ? 'rgba(79,142,247,0.15)' : 'rgba(34,197,94,0.15)',
+            border: `2px solid ${n.type === 'start' ? 'rgba(79,142,247,0.5)' : 'rgba(34,197,94,0.5)'}`,
+            borderRadius: '12px',
+            color: n.type === 'start' ? '#76aaff' : '#4ade80',
+            fontSize: '12px',
+            fontWeight: 700,
+            padding: '10px 20px',
+            minWidth: '80px',
+            textAlign: 'center' as const,
+          }
+        : undefined,
   }));
 }
 
@@ -48,6 +65,9 @@ function toFlowEdges(value: any): Edge[] {
     id: e.id ?? `${e.source}-${e.target}`,
     animated: true,
     label: e.label,
+    style: { stroke: '#4f8ef7', strokeWidth: 2 },
+    labelStyle: { fill: '#aec6e0', fontSize: 11 },
+    labelBgStyle: { fill: '#1c2c42', fillOpacity: 0.9 },
   }));
 }
 
@@ -61,7 +81,6 @@ function serializeGraph(ns: Node[], es: Edge[]) {
       if (type === 'condition') node.condition_expr = (n.data as any).condition_expr ?? '';
       return node;
     }),
-    // Only keep edges where both source and target exist as real nodes
     edges: es
       .filter((e) => e.source && e.target && nodeIds.has(e.source) && nodeIds.has(e.target))
       .map((e) => {
@@ -113,7 +132,10 @@ export function WorkflowCanvas({
 
   function onConnect(c: Connection) {
     setEdges((current) => {
-      const next = addEdge({ ...c, id: `e-${Date.now()}`, animated: true }, current);
+      const next = addEdge(
+        { ...c, id: `e-${Date.now()}`, animated: true, style: { stroke: '#4f8ef7', strokeWidth: 2 } },
+        current
+      );
       emit(nodes, next);
       return next;
     });
@@ -125,7 +147,7 @@ export function WorkflowCanvas({
       {
         id: `agent-${Date.now()}`,
         type: 'agent',
-        position: { x: 220, y: 160 },
+        position: { x: 220 + Math.random() * 80, y: 160 + Math.random() * 80 },
         data: { ...a, agent_id: a.id },
       },
     ];
@@ -148,27 +170,55 @@ export function WorkflowCanvas({
   }
 
   return (
-    <div className="grid h-[calc(100vh-160px)] grid-cols-[240px_1fr] border border-border bg-white">
-      <aside className="overflow-auto border-r p-3">
-        <button
-          type="button"
-          onClick={addCondition}
-          className="mb-3 w-full rounded bg-accent px-3 py-2 text-sm text-white"
-        >
-          Add Condition
-        </button>
-        {agents.map((a) => (
+    <div className="grid h-[calc(100vh-180px)] grid-cols-[220px_1fr] border border-border rounded-xl overflow-hidden bg-bg">
+      {/* Sidebar */}
+      <aside className="overflow-y-auto border-r border-border bg-surface p-3 space-y-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted px-1 py-1">
+            Add Nodes
+          </p>
           <button
             type="button"
-            key={a.id}
-            onClick={() => addAgent(a)}
-            className="mb-2 w-full rounded border p-2 text-left text-sm hover:bg-slate-50"
+            onClick={addCondition}
+            className="flex items-center gap-2 w-full rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-sm font-medium text-accent hover:bg-accent/20 transition-colors"
           >
-            <strong>{a.name}</strong>
-            <div className="text-xs text-slate-500">{a.role}</div>
+            <GitBranch size={14} />
+            Add Condition
           </button>
-        ))}
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted px-1 py-1">
+            Agents ({agents.length})
+          </p>
+          <div className="space-y-1.5">
+            {agents.map((a) => (
+              <button
+                type="button"
+                key={a.id}
+                onClick={() => addAgent(a)}
+                className="flex items-center gap-2.5 w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left hover:border-primary/40 hover:bg-primary/5 transition-all group"
+              >
+                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+                  <Bot size={13} className="text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+                    {a.name}
+                  </div>
+                  <div className="text-[10px] text-muted truncate">{a.model}</div>
+                </div>
+                <Plus size={12} className="ml-auto text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            ))}
+            {agents.length === 0 && (
+              <p className="text-xs text-muted/60 px-2 py-2">No agents yet. Create agents first.</p>
+            )}
+          </div>
+        </div>
       </aside>
+
+      {/* Canvas */}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -177,9 +227,22 @@ export function WorkflowCanvas({
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView
+        style={{ background: '#0f1724' }}
       >
-        <Background />
+        <Background variant={BackgroundVariant.Dots} color="#2e4565" gap={20} size={1.5} />
         <Controls />
+        <MiniMap
+          nodeColor={(n) =>
+            n.type === 'agent'
+              ? '#4f8ef7'
+              : n.type === 'condition'
+                ? '#f97316'
+                : n.type === 'input'
+                  ? '#4f8ef7'
+                  : '#22c55e'
+          }
+          maskColor="rgba(14, 22, 35, 0.75)"
+        />
       </ReactFlow>
     </div>
   );

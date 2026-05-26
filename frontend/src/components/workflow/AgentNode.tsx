@@ -1,20 +1,28 @@
 import { Handle, Position } from 'react-flow-renderer';
+import { Bot } from 'lucide-react';
 
 export function AgentNode({ data }: any) {
   return (
-    <div className="min-w-[180px] rounded-md border-2 border-primary bg-white p-3 shadow">
-      <Handle type="target" position={Position.Top} />
-      <div className="flex items-center gap-2">
-        <div className="grid h-8 w-8 place-items-center rounded bg-primary text-xs font-bold text-white">
-          {(data.name || 'A').slice(0, 2).toUpperCase()}
+    <div className="min-w-[190px] rounded-2xl border-2 border-primary/40 bg-card shadow-card overflow-hidden hover:border-primary/70 transition-all">
+      <div className="h-0.5 w-full bg-gradient-to-r from-primary to-violet-500" />
+      <Handle type="target" position={Position.Top}
+        style={{ background:'#4f8ef7', border:'2px solid #1c2c42', width:10, height:10 }} />
+      <div className="p-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary/30 to-violet-600/30 border border-primary/30 flex items-center justify-center shrink-0">
+            <Bot size={14} className="text-primary-light" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-white truncate">{data.name}</p>
+            <p className="text-[10px] text-muted-light truncate">{data.role}</p>
+          </div>
         </div>
-        <div>
-          <div className="font-semibold">{data.name}</div>
-          <div className="text-xs text-slate-500">{data.role}</div>
+        <div className="mt-2.5 rounded-lg bg-surface border border-border px-2.5 py-1 text-[10px] text-muted font-mono truncate">
+          {data.model}
         </div>
       </div>
-      <div className="mt-2 rounded bg-slate-100 px-2 py-1 text-xs">{data.model}</div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Bottom}
+        style={{ background:'#4f8ef7', border:'2px solid #1c2c42', width:10, height:10 }} />
     </div>
   );
 }

@@ -1,49 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Send, Bot, User, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, Send, Sparkles, Trash2, User, Wrench } from 'lucide-react';
 import { AgentAPI, type ChatMessage, type ToolStep } from '../api/client';
 import { useAgents } from '../hooks/useAgents';
 import { Button } from '../components/ui/button';
 
-type Turn = {
-  role: 'user' | 'assistant';
-  content: string;
-  steps?: ToolStep[];   // tool calls made during this turn
-};
+type Turn = { role: 'user' | 'assistant'; content: string; steps?: ToolStep[] };
 
-function ToolCallLog({ steps }: { steps: ToolStep[] }) {
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+function ToolLog({ steps }: { steps: ToolStep[] }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
   return (
     <div className="mt-2 space-y-1.5">
       {steps.map((s, i) => (
-        <div key={i} className="rounded-md border border-slate-200 bg-white text-xs">
+        <div key={i} className="rounded-xl border border-border bg-surface overflow-hidden text-xs">
           <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left"
-            onClick={() => setExpanded((p) => ({ ...p, [i]: !p[i] }))}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left hover:bg-card-hover transition-colors"
+            onClick={() => setOpen(p => ({ ...p, [i]: !p[i] }))}
           >
-            <Wrench size={12} className="shrink-0 text-primary" />
-            <span className="font-mono font-semibold text-primary">{s.tool}</span>
-            <span className="ml-1 truncate text-slate-400">{s.input.slice(0, 80)}</span>
-            {expanded[i] ? (
-              <ChevronDown size={12} className="ml-auto shrink-0 text-slate-400" />
-            ) : (
-              <ChevronRight size={12} className="ml-auto shrink-0 text-slate-400" />
-            )}
+            <Wrench size={11} className="shrink-0 text-indigo-400" />
+            <span className="font-mono font-bold text-indigo-400">{s.tool}</span>
+            <span className="ml-1 truncate text-muted-light">{s.input.slice(0, 70)}</span>
+            {open[i] ? <ChevronDown size={11} className="ml-auto shrink-0 text-muted" />
+                     : <ChevronRight size={11} className="ml-auto shrink-0 text-muted" />}
           </button>
-          {expanded[i] && (
-            <div className="border-t border-slate-100 px-3 py-2 space-y-2">
-              <div>
-                <p className="mb-0.5 font-semibold text-slate-500">Input</p>
-                <pre className="whitespace-pre-wrap break-all rounded bg-slate-50 p-2 text-slate-700">
-                  {s.input}
-                </pre>
-              </div>
-              <div>
-                <p className="mb-0.5 font-semibold text-slate-500">Output</p>
-                <pre className="whitespace-pre-wrap break-all rounded bg-slate-50 p-2 text-slate-700">
-                  {s.output}
-                </pre>
-              </div>
+          {open[i] && (
+            <div className="border-t border-border px-3.5 py-3 space-y-2.5">
+              {[['Input', s.input], ['Output', s.output]].map(([label, val]) => (
+                <div key={label}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1">{label}</p>
+                  <pre className="whitespace-pre-wrap break-all rounded-lg bg-bg border border-border p-2.5 text-xs text-subtle leading-relaxed">{val}</pre>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -56,203 +43,184 @@ export function Chat() {
   const { agentId } = useParams<{ agentId: string }>();
   const nav = useNavigate();
   const agents = useAgents();
-
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef  = useRef<HTMLTextAreaElement>(null);
+  const agent = agents.data?.find(a => a.id === agentId);
 
-  const selectedAgent = agents.data?.find((a) => a.id === agentId);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [turns, thinking]);
+  useEffect(() => { inputRef.current?.focus(); setTurns([]); setError(''); }, [agentId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [turns, thinking]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    setTurns([]);
-    setError('');
-  }, [agentId]);
-
-  // Build the flat ChatMessage[] history the API needs (no tool steps)
-  const messageHistory = (): ChatMessage[] =>
-    turns.map((t) => ({ role: t.role, content: t.content }));
+  const history = (): ChatMessage[] => turns.map(t => ({ role: t.role, content: t.content }));
 
   async function send() {
     const text = input.trim();
     if (!text || !agentId || thinking) return;
-
-    setInput('');
-    setError('');
-    setTurns((prev) => [...prev, { role: 'user', content: text }]);
+    setInput(''); setError('');
+    setTurns(p => [...p, { role: 'user', content: text }]);
     setThinking(true);
-
     try {
-      const res = await AgentAPI.chat(agentId, text, messageHistory());
-      setTurns((prev) => [
-        ...prev,
-        { role: 'assistant', content: res.output, steps: res.steps },
-      ]);
+      const res = await AgentAPI.chat(agentId, text, history());
+      setTurns(p => [...p, { role: 'assistant', content: res.output, steps: res.steps }]);
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Failed to get response');
+      setError(e?.response?.data?.detail ?? e?.message ?? 'Error');
     } finally {
       setThinking(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
 
-  function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+  function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
-  if (agents.isLoading) return <p className="p-6">Loading agents...</p>;
-
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col">
-      {/* Agent selector */}
-      <div className="flex items-center gap-3 border-b bg-white px-4 py-3">
+    <div className="flex h-screen flex-col bg-bg">
+
+      {/* ── Top bar ── */}
+      <div className="flex items-center gap-4 border-b border-border bg-surface/80 backdrop-blur px-6 py-3 shrink-0">
+        {/* Agent picker */}
         <div className="relative">
           <select
-            className="appearance-none rounded-md border border-slate-200 bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+            className="appearance-none h-9 rounded-xl border border-border bg-card pl-3.5 pr-8 text-sm text-foreground font-medium focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/15 cursor-pointer"
             value={agentId ?? ''}
-            onChange={(e) => nav(`/chat/${e.target.value}`)}
+            onChange={e => nav(`/chat/${e.target.value}`)}
           >
             <option value="" disabled>Select an agent…</option>
-            {agents.data?.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
+            {agents.data?.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <ChevronDown size={14} className="pointer-events-none absolute right-2 top-2.5 text-slate-400" />
+          <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-2.5 text-muted" />
         </div>
-        {selectedAgent && (
-          <div>
-            <p className="text-sm font-semibold">{selectedAgent.name}</p>
-            <p className="text-xs text-slate-500">{selectedAgent.role}</p>
+
+        {agent && (
+          <div className="flex items-center gap-2.5 pl-3 border-l border-border">
+            <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">
+              <Bot size={14} className="text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white leading-tight">{agent.name}</p>
+              <p className="text-[11px] text-muted leading-tight">{agent.model}</p>
+            </div>
           </div>
         )}
-        {selectedAgent && selectedAgent.tools.length > 0 && (
-          <div className="ml-2 flex flex-wrap gap-1">
-            {selectedAgent.tools.map((t) => (
-              <span key={t} className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                <Wrench size={10} />
-                {t}
+
+        {agent && agent.tools.length > 0 && (
+          <div className="hidden md:flex flex-wrap gap-1.5 pl-3 border-l border-border">
+            {agent.tools.slice(0, 4).map(t => (
+              <span key={t} className="inline-flex items-center gap-1 rounded-lg bg-surface border border-border px-2 py-0.5 text-[11px] text-muted-light">
+                <Wrench size={9} />{t}
               </span>
             ))}
+            {agent.tools.length > 4 && <span className="text-[11px] text-muted py-0.5">+{agent.tools.length - 4}</span>}
           </div>
         )}
+
         {turns.length > 0 && (
           <button
             onClick={() => { setTurns([]); setError(''); }}
-            className="ml-auto text-xs text-slate-400 hover:text-slate-600"
+            className="ml-auto flex items-center gap-1.5 text-xs text-muted hover:text-red-400 transition-colors rounded-lg px-2 py-1 hover:bg-red-500/10"
           >
-            Clear chat
+            <Trash2 size={12} />Clear
           </button>
         )}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {/* ── Messages ── */}
+      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
         {!agentId ? (
-          <div className="flex h-full items-center justify-center text-slate-400">
+          <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <Bot size={48} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">Select an agent to start chatting</p>
+              <div className="mx-auto mb-5 w-20 h-20 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-glow">
+                <Sparkles size={32} className="text-white" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2">AI Agent Chat</h2>
+              <p className="text-muted-light text-sm">Select an agent from the dropdown above to begin.</p>
             </div>
           </div>
         ) : turns.length === 0 && !thinking ? (
-          <div className="flex h-full items-center justify-center text-slate-400">
-            <div className="text-center">
-              <Bot size={48} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-medium">{selectedAgent?.name}</p>
-              <p className="mt-1 text-xs">{selectedAgent?.role}</p>
-              {selectedAgent && selectedAgent.tools.length > 0 && (
-                <p className="mt-3 text-xs">
-                  Tools: {selectedAgent.tools.join(', ')}
-                </p>
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center max-w-sm">
+              <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-glow">
+                <Bot size={26} className="text-white" />
+              </div>
+              <h2 className="text-lg font-bold text-white mb-1">{agent?.name}</h2>
+              <p className="text-sm text-muted-light">{agent?.role}</p>
+              {agent && agent.tools.length > 0 && (
+                <p className="mt-3 text-xs text-muted">{agent.tools.length} tools available</p>
               )}
-              <p className="mt-4 text-xs">Type a message below to start the conversation</p>
+              <p className="mt-5 text-xs text-muted border-t border-border pt-4">
+                Type a message to start the conversation
+              </p>
             </div>
           </div>
         ) : (
           <>
-            {turns.map((turn, i) => (
-              <div key={i} className={`flex gap-3 ${turn.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div
-                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-white ${
-                    turn.role === 'user' ? 'bg-primary' : 'bg-slate-400'
-                  }`}
-                >
-                  {turn.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+            {turns.map((t, i) => (
+              <div key={i} className={`flex gap-3 ${t.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center text-white ${t.role === 'user' ? 'bg-gradient-primary shadow-glow-sm' : 'bg-card border border-border'}`}>
+                  {t.role === 'user' ? <User size={14} /> : <Bot size={14} />}
                 </div>
-                <div className="max-w-[75%] space-y-1">
-                  <div
-                    className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                      turn.role === 'user'
-                        ? 'rounded-tr-sm bg-primary text-white'
-                        : 'rounded-tl-sm bg-slate-100 text-slate-800'
-                    }`}
-                  >
-                    {turn.content}
+                <div className="max-w-[78%] space-y-2">
+                  <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                    t.role === 'user'
+                      ? 'rounded-tr-sm bg-gradient-primary text-white shadow-glow-sm'
+                      : 'rounded-tl-sm bg-card border border-border text-subtle'
+                  }`}>
+                    {t.content}
                   </div>
-                  {/* Tool call log — shown below assistant turns */}
-                  {turn.role === 'assistant' && turn.steps && turn.steps.length > 0 && (
-                    <ToolCallLog steps={turn.steps} />
-                  )}
+                  {t.role === 'assistant' && t.steps && t.steps.length > 0 && <ToolLog steps={t.steps} />}
                 </div>
               </div>
             ))}
 
             {thinking && (
               <div className="flex gap-3">
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-400 text-white">
-                  <Bot size={14} />
+                <div className="w-8 h-8 rounded-xl shrink-0 bg-card border border-border flex items-center justify-center">
+                  <Bot size={14} className="text-muted-light" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm bg-slate-100 px-4 py-3">
-                  <span className="flex gap-1">
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+                <div className="rounded-2xl rounded-tl-sm bg-card border border-border px-4 py-3">
+                  <span className="flex gap-1.5 items-center">
+                    {[0,150,300].map(d => (
+                      <span key={d} className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                    ))}
                   </span>
                 </div>
               </div>
             )}
-            {error && <p className="text-center text-xs text-red-500">{error}</p>}
+            {error && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-300 text-center">{error}</div>
+            )}
           </>
         )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Input bar */}
-      <div className="border-t bg-white px-4 py-3">
-        <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+      {/* ── Input bar ── */}
+      <div className="border-t border-border bg-surface/80 backdrop-blur px-6 py-4 shrink-0">
+        <div className="flex items-end gap-3 rounded-2xl border border-border bg-card px-4 py-3 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
           <textarea
             ref={inputRef}
             rows={1}
             disabled={!agentId || thinking}
-            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-slate-400 max-h-32"
-            placeholder={agentId ? 'Ask anything… (Enter to send, Shift+Enter for newline)' : 'Select an agent first'}
+            className="flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted max-h-40"
+            placeholder={agentId ? 'Ask anything… (Enter to send, Shift+Enter for new line)' : 'Select an agent first'}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            onInput={(e) => {
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKey}
+            onInput={e => {
               const t = e.currentTarget;
               t.style.height = 'auto';
               t.style.height = `${t.scrollHeight}px`;
             }}
           />
-          <Button
-            onClick={send}
-            disabled={!input.trim() || !agentId || thinking}
-            className="shrink-0 px-2 py-1 h-auto"
-          >
-            <Send size={16} />
+          <Button size="sm" onClick={send} disabled={!input.trim() || !agentId || thinking}>
+            <Send size={14} />
           </Button>
         </div>
+        <p className="text-center text-[10px] text-muted/50 mt-2">Enter to send · Shift+Enter for new line</p>
       </div>
     </div>
   );

@@ -83,10 +83,21 @@ LangGraph was chosen because:
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose
-- A Google AI Studio API key (free) — **or** an OpenAI / Anthropic key
 
-### 1 — Clone and configure
+| Tool | Purpose | Install |
+|---|---|---|
+| Python 3.10+ | Backend runtime | [python.org](https://python.org) |
+| Node.js 18+ | Frontend dev server | [nodejs.org](https://nodejs.org) |
+| Docker | Runs Redis locally | [docker.com](https://docker.com) |
+| ngrok | Public tunnel for Telegram webhook | `brew install ngrok` or [ngrok.com](https://ngrok.com) |
+
+At least one LLM API key is required. Gemini has a free tier — recommended for getting started.
+
+---
+
+### Option A — One command (local dev)
+
+**1 — Clone and configure**
 
 ```bash
 git clone <your-repo-url>
@@ -94,32 +105,81 @@ cd ai-orchestration-platform
 cp .env.example .env
 ```
 
-Open `.env` and fill in at least one model key:
+Open `.env` and fill in your values:
 
 ```env
-# Pick at least one — Gemini is free
-GEMINI_API_KEY=AIza...              # Google AI Studio (free tier)
-OPENAI_API_KEY=sk-...              # Optional
-ANTHROPIC_API_KEY=sk-ant-...       # Optional
+# Database (Neon, Supabase, or local Postgres)
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/orchestration
 
-# Telegram (optional — needed for bot integration)
+# Pick at least one LLM key — Gemini is free
+GEMINI_API_KEY=AIza...
+OPENAI_API_KEY=sk-...          # optional
+ANTHROPIC_API_KEY=sk-ant-...   # optional
+
+# Telegram bot (optional — enables the /webhook/telegram integration)
 TELEGRAM_BOT_TOKEN=123456:ABC...
 ```
 
-### 2 — Start everything
+**2 — Run**
 
 ```bash
+chmod +x start.sh
+./start.sh
+```
+
+That's it. The script handles everything automatically:
+
+| Step | What happens |
+|---|---|
+| **1** | Starts Redis in Docker on port 6379 |
+| **2** | Creates/activates Python venv, installs dependencies |
+| **3** | Runs `alembic upgrade head` to apply DB migrations |
+| **4** | Starts FastAPI backend on **:8000**, waits for `/health` |
+| **5** | Starts Celery worker for scheduled agent tasks |
+| **6** | Starts Vite frontend on **:5173** |
+| **7** | Starts ngrok tunnel, reads the public HTTPS URL, and automatically registers your Telegram webhook |
+
+**Once running:**
+
+```
+  Frontend   →  http://localhost:5173
+  Backend    →  http://localhost:8000
+  API Docs   →  http://localhost:8000/docs
+  Public URL →  https://xxxx.ngrok-free.app   ← auto-registered with Telegram
+```
+
+**Stop everything:** press `Ctrl+C` — all services and the Docker Redis container shut down cleanly.
+
+**Logs** for each service are written to `.logs/` in the project root:
+
+```
+.logs/
+├── backend.log
+├── celery.log
+├── frontend.log
+└── ngrok.log
+```
+
+---
+
+### Option B — Docker Compose (containerised)
+
+```bash
+cp .env.example .env
+# fill in API keys in .env
 docker compose up --build
 ```
 
-On first boot Docker will:
+Docker will:
 1. Start PostgreSQL and Redis
 2. Run Alembic migrations
-3. Seed 2 workflow templates and 8 demo agents
-4. Start the FastAPI backend on **port 8000**
-5. Serve the React frontend on **port 3000**
+3. Seed 2 workflow templates and demo agents
+4. Start the FastAPI backend on **:8000**
+5. Serve the React frontend on **:3000**
 
 Open **http://localhost:3000** to access the UI.
+
+> **Telegram with Docker:** you still need ngrok (or another tunnel) running externally, then register the webhook URL via the Settings page in the UI.
 
 ---
 
@@ -227,9 +287,17 @@ Start → Research Agent → Analysis Agent → Writing Agent → Review Agent
 
 ## Telegram Integration
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token into `TELEGRAM_BOT_TOKEN`.
-2. Expose your backend publicly (ngrok, Cloudflare Tunnel, etc.) and set `PUBLIC_BASE_URL`.
-3. In the Settings page, paste your public URL and click **Register Webhook**.
+### Automatic setup (via `./start.sh`)
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token into `TELEGRAM_BOT_TOKEN` in `.env`.
+2. Run `./start.sh` — ngrok starts automatically, the public URL is captured, and the webhook is registered without any manual steps.
+3. Message your bot — it will present a workflow selection menu immediately.
+
+### Manual setup (Docker / production)
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and set `TELEGRAM_BOT_TOKEN` in `.env`.
+2. Expose your backend publicly (ngrok, Cloudflare Tunnel, reverse proxy, etc.).
+3. In the **Settings** page, paste your public URL and click **Register Webhook**.
 4. Message your bot on Telegram — it will present a workflow selection menu.
 
 **Supported commands:**

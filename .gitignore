@@ -66,3 +66,8 @@ postgres-data/
 
 # Ruff cache
 .ruff_cache/
+
+# AgentMesh runtime logs
+.logs/
+*.sh.bak
+.env.bak

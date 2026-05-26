@@ -32,7 +32,7 @@ flowchart LR
     subgraph FastAPI[FastAPI Backend]
         API[REST API\n/api/*]
         WS[WebSocket\n/ws/executions/*/logs]
-        Webhook[/webhook/telegram]
+        Webhook["/webhook/telegram"]
     end
 
     FastAPI -->|async sessions| PostgreSQL[(PostgreSQL\nAgents · Workflows\nExecutions · Logs · Messages)]

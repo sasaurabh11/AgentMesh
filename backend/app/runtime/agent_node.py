@@ -47,7 +47,7 @@ async def _persist_log(
 
 def build_agent_node(agent: Agent) -> Callable[[OrchestrationState], OrchestrationState]:
     selected_tools = get_tools(agent.tools or [])
-    llm = build_chat_model(agent.model, temperature=0.2)
+    llm = build_chat_model(agent.model, temperature=0.2, api_key=agent.api_key or None)
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", agent.system_prompt),

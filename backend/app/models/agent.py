@@ -16,6 +16,7 @@ class Agent(Base):
     role: Mapped[str] = mapped_column(String(255), nullable=False)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
+    api_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tools: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     memory_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     memory_config: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
+import smtplib
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from asyncio import AbstractEventLoop
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -30,10 +36,13 @@ WORKSPACE = Path(settings.workspace_dir).resolve()
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# Web Search
+# ---------------------------------------------------------------------------
+
 @tool
 def web_search(query: str) -> str:
     """Search the web and return concise result snippets."""
-    # Use Tavily if API key is configured (reliable, no rate limits on free tier)
     if settings.tavily_api_key:
         try:
             from tavily import TavilyClient
@@ -49,7 +58,6 @@ def web_search(query: str) -> str:
         except Exception as e:
             return f"web_search (Tavily) failed: {e}"
 
-    # Fallback: DuckDuckGo (may be rate-limited)
     from duckduckgo_search.exceptions import RatelimitException, DuckDuckGoSearchException
     last_err: Exception | None = None
     for backend in ("html", "lite", "api"):
@@ -76,6 +84,10 @@ def web_search(query: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# HTTP Request
+# ---------------------------------------------------------------------------
+
 class HttpRequestArgs(BaseModel):
     url: str
     method: str = "GET"
@@ -95,6 +107,10 @@ http_request = StructuredTool.from_function(
     args_schema=HttpRequestArgs,
 )
 
+
+# ---------------------------------------------------------------------------
+# Telegram
+# ---------------------------------------------------------------------------
 
 class TelegramArgs(BaseModel):
     chat_id: str
@@ -121,6 +137,10 @@ send_telegram_message = StructuredTool.from_function(
     args_schema=TelegramArgs,
 )
 
+
+# ---------------------------------------------------------------------------
+# File I/O
+# ---------------------------------------------------------------------------
 
 def _safe_path(path: str) -> Path:
     candidate = (WORKSPACE / path.lstrip("/")).resolve()
@@ -155,6 +175,10 @@ write_file = StructuredTool.from_function(
 )
 
 
+# ---------------------------------------------------------------------------
+# Python REPL
+# ---------------------------------------------------------------------------
+
 @tool
 def python_repl(code: str) -> str:
     """Execute Python code in a restricted subprocess and return stdout/stderr."""
@@ -184,12 +208,20 @@ def python_repl(code: str) -> str:
     return proc.stdout.strip() or "ok"
 
 
+# ---------------------------------------------------------------------------
+# Summarize Text
+# ---------------------------------------------------------------------------
+
 @tool
 def summarize_text(text: str) -> str:
     """Summarize text using the configured OpenAI model."""
     llm = build_chat_model(settings.default_summary_model)
     return llm.invoke(f"Summarize the following text clearly:\n\n{text}").content
 
+
+# ---------------------------------------------------------------------------
+# Delegate to Agent
+# ---------------------------------------------------------------------------
 
 class DelegateArgs(BaseModel):
     agent_id: str = Field(description="Target agent UUID")
@@ -245,16 +277,15 @@ delegate_to_agent = StructuredTool.from_function(
 )
 
 
+# ---------------------------------------------------------------------------
+# Human Input
+# ---------------------------------------------------------------------------
+
 class HumanInputArgs(BaseModel):
     question: str = Field(description="The question to ask the user")
 
 
 def _request_human_input(question: str) -> str:
-    """
-    Synchronous tool function that runs in a thread-pool thread.
-    Publishes the waiting_for_input event on the main event loop, then blocks
-    this thread with a synchronous Redis poll (no event-loop conflicts).
-    """
     exec_id = _current_execution_id.get()
     loop = _current_event_loop.get()
     if not exec_id or loop is None:
@@ -262,10 +293,7 @@ def _request_human_input(question: str) -> str:
 
     from app.runtime.human_input import publish_waiting, poll_input_sync
 
-    # Publish the event on the main event loop (async-safe from a thread)
     asyncio.run_coroutine_threadsafe(publish_waiting(exec_id, question), loop).result(timeout=30)
-
-    # Block this thread with a plain sync poll — no event loop needed
     return poll_input_sync(exec_id, timeout=300)
 
 
@@ -280,7 +308,343 @@ request_human_input = StructuredTool.from_function(
 )
 
 
+# ===========================================================================
+# NEW TOOLS
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Extract Webpage — scrape clean readable text from any URL
+# ---------------------------------------------------------------------------
+
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML → plain-text converter using the stdlib parser."""
+    _SKIP = {"script", "style", "head", "nav", "footer", "aside", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._depth = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in self._SKIP:
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP:
+            self._depth = max(0, self._depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        if not self._depth:
+            text = data.strip()
+            if text:
+                self.parts.append(text)
+
+    def get_text(self) -> str:
+        return "\n".join(self.parts)
+
+
+@tool
+def extract_webpage(url: str) -> str:
+    """Fetch a URL and return its readable text content (HTML stripped). Ideal for reading articles, docs, and pages."""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"}
+    resp = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
+    resp.raise_for_status()
+    stripper = _HTMLStripper()
+    stripper.feed(resp.text)
+    text = stripper.get_text()
+    if not text.strip():
+        return resp.text[:6000]
+    return text[:8000]
+
+
+# ---------------------------------------------------------------------------
+# 2. Get Datetime — current date/time info
+# ---------------------------------------------------------------------------
+
+@tool
+def get_datetime(timezone_name: str = "UTC") -> str:
+    """Return the current date and time. Provide a timezone name like 'UTC', 'US/Eastern', 'Asia/Dubai'. Defaults to UTC."""
+    try:
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(timezone_name)
+        now = datetime.now(tz)
+    except Exception:
+        now = datetime.now(timezone.utc)
+
+    return (
+        f"Current date/time ({now.tzname()}):\n"
+        f"  ISO 8601  : {now.isoformat()}\n"
+        f"  Readable  : {now.strftime('%A, %B %d, %Y at %I:%M %p %Z')}\n"
+        f"  Date only : {now.strftime('%Y-%m-%d')}\n"
+        f"  Time only : {now.strftime('%H:%M:%S')}\n"
+        f"  Unix stamp: {int(now.timestamp())}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3. List Files — browse the /workspace directory
+# ---------------------------------------------------------------------------
+
+class ListFilesArgs(BaseModel):
+    directory: str = Field(default="", description="Sub-directory inside /workspace to list. Leave blank for root.")
+
+
+def _list_files(directory: str = "") -> str:
+    target = _safe_path(directory) if directory.strip() else WORKSPACE
+    if not target.exists():
+        return f"Directory does not exist: {directory}"
+    entries = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+    if not entries:
+        return "Empty directory."
+    lines = []
+    for p in entries:
+        if p.is_dir():
+            lines.append(f"[DIR]  {p.name}/")
+        else:
+            size = p.stat().st_size
+            lines.append(f"[FILE] {p.name}  ({size:,} bytes)")
+    return "\n".join(lines)
+
+
+list_files = StructuredTool.from_function(
+    func=_list_files,
+    name="list_files",
+    description="List files and folders inside /workspace (or a sub-directory). Use this to see what files are available before reading them.",
+    args_schema=ListFilesArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# 4. RSS Reader — fetch and parse an RSS/Atom feed
+# ---------------------------------------------------------------------------
+
+class RssReaderArgs(BaseModel):
+    url: str = Field(description="URL of the RSS or Atom feed")
+    max_items: int = Field(default=8, ge=1, le=20, description="Maximum number of articles to return")
+
+
+def _rss_reader(url: str, max_items: int = 8) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"}
+    resp = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
+    resp.raise_for_status()
+
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError as e:
+        return f"Failed to parse feed XML: {e}"
+
+    items: list[dict] = []
+
+    # RSS 2.0
+    for item in root.iter("item"):
+        title = item.findtext("title", "").strip()
+        link = item.findtext("link", "").strip()
+        desc = item.findtext("description", "").strip()[:300]
+        pub = item.findtext("pubDate", "").strip()
+        items.append({"title": title, "link": link, "description": desc, "date": pub})
+        if len(items) >= max_items:
+            break
+
+    # Atom
+    if not items:
+        atom_ns = "http://www.w3.org/2005/Atom"
+        for entry in root.iter(f"{{{atom_ns}}}entry"):
+            title = entry.findtext(f"{{{atom_ns}}}title", "").strip()
+            link_el = entry.find(f"{{{atom_ns}}}link")
+            link = link_el.get("href", "") if link_el is not None else ""
+            summary = entry.findtext(f"{{{atom_ns}}}summary", "").strip()[:300]
+            updated = entry.findtext(f"{{{atom_ns}}}updated", "").strip()
+            items.append({"title": title, "link": link, "description": summary, "date": updated})
+            if len(items) >= max_items:
+                break
+
+    if not items:
+        return "No items found in the feed."
+
+    lines = [f"Feed: {url}\n"]
+    for i, it in enumerate(items, 1):
+        lines.append(
+            f"{i}. {it['title']}\n"
+            f"   Link: {it['link']}\n"
+            f"   Date: {it['date']}\n"
+            f"   {it['description']}"
+        )
+    return "\n\n".join(lines)
+
+
+rss_reader = StructuredTool.from_function(
+    func=_rss_reader,
+    name="rss_reader",
+    description="Fetch and parse an RSS or Atom feed URL. Returns recent article titles, links, dates, and summaries. Useful for monitoring news or blogs.",
+    args_schema=RssReaderArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# 5. Send Email — send an email via SMTP
+# ---------------------------------------------------------------------------
+
+class SendEmailArgs(BaseModel):
+    to: str = Field(description="Recipient email address (or comma-separated list)")
+    subject: str = Field(description="Email subject line")
+    body: str = Field(description="Plain-text email body")
+
+
+def _send_email(to: str, subject: str, body: str) -> str:
+    host = settings.smtp_host
+    if not host:
+        return (
+            "SMTP is not configured. Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD "
+            "to your .env file to enable email sending."
+        )
+
+    msg = MIMEMultipart()
+    msg["From"] = settings.smtp_from or settings.smtp_user
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(host, settings.smtp_port, timeout=15) as smtp:
+            smtp.ehlo()
+            if settings.smtp_use_tls:
+                smtp.starttls()
+                smtp.ehlo()
+            if settings.smtp_user and settings.smtp_password:
+                smtp.login(settings.smtp_user, settings.smtp_password)
+            smtp.sendmail(msg["From"], [addr.strip() for addr in to.split(",")], msg.as_string())
+        return f"Email sent successfully to {to}."
+    except Exception as e:
+        return f"Failed to send email: {e}"
+
+
+send_email = StructuredTool.from_function(
+    func=_send_email,
+    name="send_email",
+    description=(
+        "Send an email. Requires SMTP_HOST to be configured in .env. "
+        "Args: to (recipient address), subject, body (plain text)."
+    ),
+    args_schema=SendEmailArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# 6. Save Note — persist a named note to Redis
+# ---------------------------------------------------------------------------
+
+class SaveNoteArgs(BaseModel):
+    key: str = Field(description="Short name/key for this note (e.g. 'research_summary')")
+    value: str = Field(description="Content to store")
+
+
+def _save_note(key: str, value: str) -> str:
+    import redis as redis_lib
+    r = redis_lib.from_url(settings.redis_url, decode_responses=True)
+    redis_key = f"agent:note:{key.strip()}"
+    r.set(redis_key, value, ex=86400 * 7)  # expires in 7 days
+    return f"Note '{key}' saved ({len(value)} chars). Expires in 7 days."
+
+
+save_note = StructuredTool.from_function(
+    func=_save_note,
+    name="save_note",
+    description=(
+        "Save a named note or piece of information to persistent storage (Redis). "
+        "Use this to remember facts, results, or context across agent runs. "
+        "Notes expire after 7 days."
+    ),
+    args_schema=SaveNoteArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# 7. Get Note — retrieve a previously saved note from Redis
+# ---------------------------------------------------------------------------
+
+class GetNoteArgs(BaseModel):
+    key: str = Field(description="The key/name of the note to retrieve")
+
+
+def _get_note(key: str) -> str:
+    import redis as redis_lib
+    r = redis_lib.from_url(settings.redis_url, decode_responses=True)
+    redis_key = f"agent:note:{key.strip()}"
+    value = r.get(redis_key)
+    if value is None:
+        ttl = r.ttl(redis_key)
+        return f"No note found for key '{key}'."
+    ttl = r.ttl(redis_key)
+    days_left = ttl // 86400 if ttl > 0 else "unknown"
+    return f"Note '{key}' (expires in ~{days_left} day(s)):\n\n{value}"
+
+
+get_note = StructuredTool.from_function(
+    func=_get_note,
+    name="get_note",
+    description=(
+        "Retrieve a previously saved note by its key name. "
+        "Use save_note first to store information, then get_note to recall it later."
+    ),
+    args_schema=GetNoteArgs,
+)
+
+
+# ---------------------------------------------------------------------------
+# 8. Analyze Image — describe or answer questions about an image URL
+# ---------------------------------------------------------------------------
+
+class AnalyzeImageArgs(BaseModel):
+    image_url: str = Field(description="Public URL of the image to analyze")
+    question: str = Field(
+        default="Describe this image in detail.",
+        description="What to ask about the image (e.g. 'What text is visible?', 'List all objects.')"
+    )
+
+
+def _analyze_image(image_url: str, question: str = "Describe this image in detail.") -> str:
+    # Fetch and encode the image as base64 so it works with any vision model
+    try:
+        resp = httpx.get(image_url, timeout=30, follow_redirects=True)
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+        image_b64 = base64.b64encode(resp.content).decode()
+        data_url = f"data:{content_type};base64,{image_b64}"
+    except Exception as e:
+        return f"Failed to fetch image: {e}"
+
+    try:
+        llm = build_chat_model(settings.default_summary_model)
+        msg = HumanMessage(content=[
+            {"type": "image_url", "image_url": {"url": data_url}},
+            {"type": "text", "text": question},
+        ])
+        result = llm.invoke([msg])
+        return str(result.content)
+    except Exception as e:
+        return (
+            f"Image analysis failed: {e}\n"
+            "Note: ensure your DEFAULT_SUMMARY_MODEL supports vision (e.g. gpt-4o, gemini-2.0-flash, claude-sonnet-4-6)."
+        )
+
+
+analyze_image = StructuredTool.from_function(
+    func=_analyze_image,
+    name="analyze_image",
+    description=(
+        "Analyze or describe an image from a public URL using a vision-capable AI model. "
+        "Can answer specific questions about image content, extract text (OCR), or describe scenes."
+    ),
+    args_schema=AnalyzeImageArgs,
+)
+
+
+# ===========================================================================
+# Registry
+# ===========================================================================
+
 AVAILABLE_TOOLS: dict[str, Any] = {
+    # Existing
     "web_search": web_search,
     "http_request": http_request,
     "send_telegram_message": send_telegram_message,
@@ -290,6 +654,15 @@ AVAILABLE_TOOLS: dict[str, Any] = {
     "summarize_text": summarize_text,
     "delegate_to_agent": delegate_to_agent,
     "request_human_input": request_human_input,
+    # New
+    "extract_webpage": extract_webpage,
+    "get_datetime": get_datetime,
+    "list_files": list_files,
+    "rss_reader": rss_reader,
+    "send_email": send_email,
+    "save_note": save_note,
+    "get_note": get_note,
+    "analyze_image": analyze_image,
 }
 
 

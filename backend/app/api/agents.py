@@ -124,7 +124,7 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
 
-    llm = build_chat_model(agent.model)
+    llm = build_chat_model(agent.model, api_key=agent.api_key or None)
     model_key = normalize_model_name(agent.model)
 
     # Build conversation history as LangChain message objects

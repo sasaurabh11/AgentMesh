@@ -1,11 +1,18 @@
 import tiktoken
 
-MODEL_PRICING_USD_PER_1K = {
+# Prices are USD per 1 000 tokens (input / output)
+MODEL_PRICING_USD_PER_1K: dict[str, dict[str, float]] = {
+    # OpenAI
     "gpt-4o": {"input": 0.005, "output": 0.015},
     "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    # Anthropic Claude
+    "claude-opus-4-7": {"input": 0.015, "output": 0.075},
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
     "claude-haiku-4-5": {"input": 0.0008, "output": 0.004},
 }
+
+# All Gemini / Gemma models are free via Google AI Studio (free tier)
+_FREE_PREFIXES = ("gemini-", "gemma-")
 
 
 def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
@@ -17,7 +24,7 @@ def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
 
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    if model.startswith("gemini-") or model.startswith("gemma-"):
+    if any(model.startswith(p) for p in _FREE_PREFIXES):
         return 0.0
     pricing = MODEL_PRICING_USD_PER_1K.get(model, MODEL_PRICING_USD_PER_1K["gpt-4o-mini"])
     return round(

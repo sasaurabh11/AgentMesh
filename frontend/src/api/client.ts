@@ -7,6 +7,8 @@ export type Agent = {
   role: string;
   system_prompt: string;
   model: string;
+  api_key?: string;
+  has_api_key?: boolean;
   tools: string[];
   memory_enabled: boolean;
   memory_config: Record<string, unknown>;

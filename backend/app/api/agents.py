@@ -23,6 +23,40 @@ from app.utils.cost_tracker import calculate_cost, count_tokens
 # Tools that require a live workflow execution context — exclude from chat/test mode
 _WORKFLOW_ONLY_TOOLS = {"delegate_to_agent", "request_human_input"}
 
+
+def _extract_text(content) -> str:
+    """Pull plain text out of an AIMessage content field regardless of format.
+
+    Models return content in several shapes:
+      - str          → regular models (OpenAI, most Gemini)
+      - list[str]    → Gemma (thinking trace + final answer as separate strings)
+      - list[dict]   → multipart/thinking models: {"type":"text","text":"..."} or
+                       {"type":"thinking","thinking":"..."}  (Gemini 2.5, Claude 3)
+      - list[obj]    → Pydantic content-block objects with a .text attribute
+
+    For list formats, thinking models put the final answer last, so we keep only
+    that last non-empty piece to avoid leaking internal reasoning to the user.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, str):
+                if p.strip():
+                    parts.append(p.strip())
+            elif isinstance(p, dict):
+                if p.get("type") == "text" and p.get("text", "").strip():
+                    parts.append(p["text"].strip())
+                elif p.get("type") not in ("thinking", "tool_use") and "text" in p and p["text"].strip():
+                    parts.append(p["text"].strip())
+            elif hasattr(p, "text") and isinstance(p.text, str) and p.text.strip():
+                parts.append(p.text.strip())
+        # Thinking models (Gemma, Gemini 2.5) emit [reasoning, final_answer].
+        # Return only the last part so the user sees the answer, not the trace.
+        return parts[-1] if parts else ""
+    return str(content)
+
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 
@@ -133,10 +167,25 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
         chat_history.append(HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content))
 
     # Filter out tools that only work inside a live workflow execution
-    chat_tools = [
-        t for t in (agent.tools or []) if t not in _WORKFLOW_ONLY_TOOLS
-    ]
+    filtered_workflow_tools = [t for t in (agent.tools or []) if t in _WORKFLOW_ONLY_TOOLS]
+    chat_tools = [t for t in (agent.tools or []) if t not in _WORKFLOW_ONLY_TOOLS]
     tools = get_tools(chat_tools)
+
+    # When workflow-only tools are stripped the model's system prompt still tells it to call
+    # them, so the LLM emits a tool-call message with empty text → output = "".
+    # Fix: tell the model explicitly it must reply in plain text; no tool calls allowed.
+    effective_system_prompt = agent.system_prompt
+    if filtered_workflow_tools:
+        effective_system_prompt += (
+            "\n\n[IMPORTANT — CHAT PREVIEW MODE]\n"
+            f"The tools {', '.join(filtered_workflow_tools)} are NOT available right now.\n"
+            "You MUST NOT emit any function calls or tool-use requests.\n"
+            "Instead respond in plain text:\n"
+            "  • If you would normally delegate, describe who you would delegate to and why.\n"
+            "  • If you would ask the user something, ask it directly as a question.\n"
+            "  • If you have enough context, outline your plan step by step.\n"
+            "Plain text reply only — no JSON, no function calls."
+        )
 
     steps: list[ToolStep] = []
 
@@ -146,7 +195,7 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
         try:
             if tools:
                 prompt = ChatPromptTemplate.from_messages([
-                    ("system", agent.system_prompt),
+                    ("system", effective_system_prompt),
                     MessagesPlaceholder("chat_history", optional=True),
                     ("human", "{input}"),
                     MessagesPlaceholder("agent_scratchpad"),
@@ -157,7 +206,7 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
                 )
                 response = await executor.ainvoke({"input": payload.input, "chat_history": chat_history})
                 output = str(response.get("output", ""))
-                context_text = agent.system_prompt + payload.input
+                context_text = effective_system_prompt + payload.input
                 for action, result in response.get("intermediate_steps", []):
                     tool_input = getattr(action, "tool_input", "")
                     steps.append(ToolStep(
@@ -166,10 +215,27 @@ async def test_agent(agent_id: UUID, payload: AgentTestRequest, db: AsyncSession
                         output=str(result)[:2000],
                     ))
             else:
-                msgs: list = [SystemMessage(content=agent.system_prompt)] + chat_history + [HumanMessage(content=payload.input)]
+                msgs: list = [SystemMessage(content=effective_system_prompt)] + chat_history + [HumanMessage(content=payload.input)]
                 result = await llm.ainvoke(msgs)
-                output = str(result.content)
-                context_text = " ".join(m.content for m in msgs if hasattr(m, "content"))
+                output = _extract_text(result.content)
+
+                # Fallback: model still emitted a tool-call instead of plain text.
+                # Reconstruct a human-readable reply from the tool call arguments.
+                if not output.strip() and getattr(result, "tool_calls", None):
+                    parts: list[str] = []
+                    for tc in result.tool_calls:
+                        name = tc.get("name", "")
+                        args = tc.get("args", {})
+                        if name == "request_human_input":
+                            parts.append(args.get("question") or args.get("prompt") or str(args))
+                        elif name == "delegate_to_agent":
+                            task = args.get("task") or args.get("message") or str(args)
+                            parts.append(f"I would delegate this to a specialist agent: {task}")
+                        elif name:
+                            parts.append(f"[Would call {name}: {args}]")
+                    output = "\n".join(parts)
+
+                context_text = " ".join(m.content for m in msgs if hasattr(m, "content") and isinstance(m.content, str))
             break  # success — exit retry loop
         except Exception as e:
             err_str = str(e).lower()

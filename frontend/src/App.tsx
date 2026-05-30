@@ -90,7 +90,7 @@ export default function App() {
               </div>
               <div>
                 <p className="text-xs font-semibold text-foreground">AgentMesh v1.0</p>
-                <p className="text-[10px] text-muted">Production ready</p>
+                <p className="text-[10px] text-muted">Made with ❤️ by Saurabh</p>
               </div>
             </div>
           </div>

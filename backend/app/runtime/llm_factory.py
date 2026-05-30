@@ -26,10 +26,7 @@ def build_chat_model(model: str, temperature: float = 0.2, api_key: str | None =
             raise RuntimeError(
                 "No Google API key configured. Add GEMINI_API_KEY to .env or set one on the agent."
             )
-        kwargs: dict = dict(model=model, google_api_key=key, temperature=temperature)
-        if "2.5" in model:
-            kwargs["thinking_budget"] = 0
-        return ChatGoogleGenerativeAI(**kwargs)
+        return ChatGoogleGenerativeAI(model=model, google_api_key=key, temperature=temperature)
 
     if is_claude_model(model):
         try:

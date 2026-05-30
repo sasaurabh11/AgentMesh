@@ -5,6 +5,7 @@ services:
     name: agentmesh-backend
     runtime: python
     rootDir: backend
+    pythonVersion: "3.11.9"
     buildCommand: pip install -r requirements.txt
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
@@ -64,6 +65,7 @@ services:
     name: agentmesh-celery
     runtime: python
     rootDir: backend
+    pythonVersion: "3.11.9"
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A app.tasks.scheduled_agents.celery_app worker --loglevel=info --concurrency=1
     envVars:

@@ -1,0 +1,85 @@
+services:
+
+  # ── Backend API ────────────────────────────────────────────────────────────
+  - type: web
+    name: agentmesh-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # ── Database (Neon / Supabase / any Postgres) ──
+      - key: DATABASE_URL
+        sync: false          # set manually in Render dashboard
+      - key: SYNC_DATABASE_URL
+        sync: false
+
+      # ── Redis (Upstash — free tier at upstash.com) ──
+      - key: REDIS_URL
+        sync: false          # rediss://default:<pw>@<host>:<port>
+
+      # ── LLM keys (at least one required) ──
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # ── Telegram (optional) ──
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+
+      # ── CORS — set to your Vercel frontend URL ──
+      - key: BACKEND_CORS_ORIGINS
+        sync: false          # e.g. https://agentmesh.vercel.app,https://your-custom-domain.com
+
+      # ── Public URL for Telegram webhook registration ──
+      - key: PUBLIC_BASE_URL
+        sync: false          # e.g. https://agentmesh-backend.onrender.com
+
+      # ── Optional extras ──
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: DEFAULT_SUMMARY_MODEL
+        value: gemini-2.5-flash
+
+  # ── Celery Worker (scheduled agents) ───────────────────────────────────────
+  - type: worker
+    name: agentmesh-celery
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.tasks.scheduled_agents.celery_app worker --loglevel=info --concurrency=1
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SYNC_DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: DEFAULT_SUMMARY_MODEL
+        value: gemini-2.5-flash

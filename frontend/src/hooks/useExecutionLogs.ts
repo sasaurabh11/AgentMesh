@@ -14,8 +14,13 @@ export function useExecutionLogs(executionId?: string) {
 
     function connect() {
       if (closing.current) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}/ws/executions/${executionId}/logs`);
+      // In production VITE_API_URL points to the Render backend (different host from Vercel).
+      // Convert it to a WebSocket URL: https://... → wss://..., http://... → ws://...
+      const apiUrl = import.meta.env.VITE_API_URL as string | undefined;
+      const wsBase = apiUrl
+        ? apiUrl.replace(/^https/, 'wss').replace(/^http/, 'ws')
+        : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+      ws = new WebSocket(`${wsBase}/ws/executions/${executionId}/logs`);
 
       ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
